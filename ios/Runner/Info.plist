@@ -26,6 +26,10 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Wir verwenden deinen Standort, um dir nahegelegene Orte, Spaziergänge und Empfehlungen in Mingalive anzuzeigen.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Wir verwenden deinen Standort, um dir Orte und Empfehlungen in deiner Nähe anzuzeigen.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
