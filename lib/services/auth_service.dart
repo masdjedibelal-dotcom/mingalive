@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../config/app_config.dart';
 import '../models/app_user.dart';
 import 'supabase_gate.dart';
 
@@ -123,7 +124,9 @@ class AuthService extends ChangeNotifier {
       // Authentication > URL Configuration > Redirect URLs
       await supabase.auth.signInWithOAuth(
         OAuthProvider.google,
-        redirectTo: kIsWeb ? Uri.base.origin : null, // Mobile handles redirect automatically
+        redirectTo: kIsWeb
+            ? Uri.base.origin
+            : AppConfig.oauthRedirectUri,
         authScreenLaunchMode: LaunchMode.externalApplication,
       );
       // User will be updated via onAuthStateChange listener
