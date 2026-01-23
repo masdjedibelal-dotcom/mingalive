@@ -1,16 +1,18 @@
-import 'dart:convert';
-import 'package:flutter/services.dart';
 import '../models/collab.dart';
+import '../services/supabase_gate.dart';
 
 class SystemCollabsStore {
-  static const String _assetPath = 'assets/localspots_lists_munich_22.json';
   static List<CollabDefinition>? _cache;
 
   static Future<List<CollabDefinition>> load() async {
     if (_cache != null) return _cache!;
-    final raw = await rootBundle.loadString(_assetPath);
-    final data = jsonDecode(raw) as Map<String, dynamic>;
-    final lists = (data['lists'] as List?) ?? [];
+    if (!SupabaseGate.isEnabled) {
+      _cache = const [];
+      return _cache!;
+    }
+    final supabase = SupabaseGate.client;
+    final response = await supabase.from('system_collabs').select();
+    final lists = (response as List?) ?? [];
     const gradientKeys = ['mint', 'sunset', 'calm', 'deep'];
     var gradientIndex = 0;
     final result = <CollabDefinition>[];
@@ -18,7 +20,7 @@ class SystemCollabsStore {
     for (final entry in lists) {
       if (entry is! Map) continue;
       final map = Map<String, dynamic>.from(entry);
-      final listId = map['list_id']?.toString() ?? '';
+      final listId = map['id']?.toString() ?? map['list_id']?.toString() ?? '';
       if (listId.isEmpty) continue;
       if (listId == 'spots_with_website') continue;
       final title = map['title']?.toString() ?? 'Empfohlen';
@@ -29,16 +31,7 @@ class SystemCollabsStore {
       final ranking = (map['ranking'] as List? ?? [])
           .map((value) => value.toString())
           .toList();
-      final spotPool = (map['spot_pool'] as List? ?? []);
-      final spotPoolIds = spotPool
-          .map((value) {
-            if (value is Map && value['id'] != null) {
-              return value['id'].toString();
-            }
-            return null;
-          })
-          .whereType<String>()
-          .toList();
+      final spotPoolIds = _extractSpotPoolIds(map);
 
       final gradientKey = gradientKeys[gradientIndex % gradientKeys.length];
       gradientIndex += 1;
@@ -65,6 +58,25 @@ class SystemCollabsStore {
 
     _cache = result;
     return result;
+  }
+
+  static List<String> _extractSpotPoolIds(Map<String, dynamic> map) {
+    final explicitIds = (map['spot_pool_ids'] as List? ?? [])
+        .map((value) => value.toString())
+        .where((value) => value.isNotEmpty)
+        .toList();
+    if (explicitIds.isNotEmpty) return explicitIds;
+
+    final spotPool = (map['spot_pool'] as List? ?? []);
+    return spotPool
+        .map((value) {
+          if (value is Map && value['id'] != null) {
+            return value['id'].toString();
+          }
+          return null;
+        })
+        .whereType<String>()
+        .toList();
   }
 
   static CollabDefinition? findById(String id) {
