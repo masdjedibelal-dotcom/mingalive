@@ -314,6 +314,22 @@ class PlaceRepository {
     }
 
     try {
+      if (collab.spotPoolIds.isNotEmpty) {
+        final spotPoolIds = collab.spotPoolIds;
+        var places = await _fetchPlacesByIds(spotPoolIds);
+        places = await _attachFavoritesCounts(places);
+        final ordered = _orderByIdList(places, spotPoolIds);
+        final withRuntime = await _applyRuntimeSorting(
+          ordered,
+          collab,
+        );
+        final limit = collab.limit;
+        if (limit > 0 && withRuntime.length > limit) {
+          return withRuntime.take(limit).toList();
+        }
+        return withRuntime;
+      }
+
       final supabase = SupabaseGate.client;
       final response = await supabase.from('places').select('*');
       var places = (response as List)
@@ -370,6 +386,164 @@ class PlaceRepository {
       }
       return [];
     }
+  }
+
+  Future<List<Place>> fetchPlacesByIds(List<String> ids) async {
+    if (!SupabaseGate.isEnabled) {
+      return [];
+    }
+    try {
+      return await _fetchPlacesByIds(ids);
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('⚠️ PlaceRepository: Failed to fetch places by ids: $e');
+      }
+      return [];
+    }
+  }
+
+  Future<List<Place>> _fetchPlacesByIds(List<String> ids) async {
+    if (ids.isEmpty) return [];
+    final supabase = SupabaseGate.client;
+    const chunkSize = 200;
+    final results = <Place>[];
+    for (var i = 0; i < ids.length; i += chunkSize) {
+      final chunk = ids.sublist(i, min(i + chunkSize, ids.length));
+      final response = await supabase.from('places').select('*').inFilter(
+            'id',
+            chunk,
+          );
+      results.addAll(
+        (response as List)
+            .map((row) => Place.fromSupabase(row as Map<String, dynamic>))
+            .toList(),
+      );
+    }
+    return results;
+  }
+
+  List<Place> _orderByIdList(List<Place> places, List<String> ids) {
+    final map = {for (final place in places) place.id: place};
+    return ids.map((id) => map[id]).whereType<Place>().toList();
+  }
+
+  Future<List<Place>> _withDistances(List<Place> places) async {
+    if (places.isEmpty) return places;
+    final origin = await _locationService.getOriginOrFallback();
+    _distanceCacheService.setOrigin(origin.lat, origin.lng);
+    return places.map((place) {
+      if (place.lat == null || place.lng == null) {
+        return place.copyWith(distanceKm: null);
+      }
+      final cached = _distanceCacheService.getDistanceKm(place.id);
+      final distanceKm = cached ??
+          _distanceCacheService.computeAndCache(
+            placeId: place.id,
+            lat: place.lat,
+            lng: place.lng,
+          );
+      return place.copyWith(distanceKm: distanceKm);
+    }).toList();
+  }
+
+  Future<List<Place>> _applyRuntimeSorting(
+    List<Place> places,
+    CollabDefinition collab,
+  ) async {
+    if (places.isEmpty) return places;
+    final filters = collab.runtimeFilters;
+    final applyDistance = filters.contains('nearby_optional');
+    final applyOpenNow = filters.contains('open_now_optional');
+    final applyLate = filters.contains('after_22_preferred');
+
+    var result = places;
+    if (applyDistance) {
+      result = await _withDistances(result);
+    }
+
+    final indexMap = <String, int>{
+      for (var i = 0; i < result.length; i++) result[i].id: i,
+    };
+
+    result.sort((a, b) {
+      if (applyOpenNow) {
+        final aOpen = _isOpenNow(a) ? 1 : 0;
+        final bOpen = _isOpenNow(b) ? 1 : 0;
+        if (aOpen != bOpen) return bOpen.compareTo(aOpen);
+      }
+
+      if (applyLate) {
+        final aLate = _isLateFriendly(a) ? 1 : 0;
+        final bLate = _isLateFriendly(b) ? 1 : 0;
+        if (aLate != bLate) return bLate.compareTo(aLate);
+      }
+
+      if (applyDistance) {
+        final distanceCompare = compareByDistanceNullable(a, b);
+        if (distanceCompare != 0) return distanceCompare;
+      }
+
+      final rankingCompare = _compareByRanking(a, b, collab.ranking);
+      if (rankingCompare != 0) return rankingCompare;
+
+      return (indexMap[a.id] ?? 0).compareTo(indexMap[b.id] ?? 0);
+    });
+
+    return result;
+  }
+
+  int _compareByRanking(Place a, Place b, List<String> ranking) {
+    for (final key in ranking) {
+      switch (key) {
+        case 'distance':
+          final distanceCompare = compareByDistanceNullable(a, b);
+          if (distanceCompare != 0) return distanceCompare;
+          break;
+        case 'rating':
+          final ratingCompare = b.rating.compareTo(a.rating);
+          if (ratingCompare != 0) return ratingCompare;
+          break;
+        case 'review_count':
+          final reviewCompare = b.ratingCount.compareTo(a.ratingCount);
+          if (reviewCompare != 0) return reviewCompare;
+          break;
+      }
+    }
+    return 0;
+  }
+
+  bool _isOpenNow(Place place) {
+    final openNow = place.openingHoursJson?['open_now'];
+    if (openNow is bool) return openNow;
+    final status = place.status?.toLowerCase() ?? '';
+    if (status.contains('geschlossen') || status.contains('closed')) {
+      return false;
+    }
+    if (status.contains('geöffnet') ||
+        status.contains('open') ||
+        status.contains('rund um die uhr')) {
+      return true;
+    }
+    return false;
+  }
+
+  bool _isLateFriendly(Place place) {
+    final status = place.status?.toLowerCase() ?? '';
+    if (status.contains('rund um die uhr')) {
+      return true;
+    }
+    final hour = _parseClosingHour(status);
+    if (hour == null) return false;
+    if (hour >= 22) return true;
+    if (hour <= 4) return true;
+    return false;
+  }
+
+  int? _parseClosingHour(String status) {
+    final regex = RegExp(r'(schließt|schliesst) um (\d{1,2})');
+    final match = regex.firstMatch(status);
+    if (match == null) return null;
+    return int.tryParse(match.group(2) ?? '');
   }
 
   /// Get all places

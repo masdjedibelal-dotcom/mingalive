@@ -30,7 +30,7 @@ class _MainShellState extends State<MainShell> {
   final GlobalKey<StreamScreenState> _streamScreenKey =
       GlobalKey<StreamScreenState>();
   final List<GlobalKey<NavigatorState>> _navigatorKeys = List.generate(
-    3,
+    4,
     (_) => GlobalKey<NavigatorState>(),
   );
 
@@ -76,22 +76,11 @@ class _MainShellState extends State<MainShell> {
 
   /// Switches to a specific tab by index
   void switchToTab(int index) {
-    if (index >= 0 && index < 3) {
+    if (index >= 0 && index < 4) {
       setState(() {
         _currentIndex = index;
       });
     }
-  }
-
-  void _openSearch(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => SearchEntryScreen(
-          kind: 'food',
-          openPlaceChat: openPlaceChat,
-        ),
-      ),
-    );
   }
 
   void _popToRoot(int index) {
@@ -132,6 +121,13 @@ class _MainShellState extends State<MainShell> {
         index: 2,
         child: const ProfileScreen(),
       ),
+      _buildTabNavigator(
+        index: 3,
+        child: SearchEntryScreen(
+          kind: 'food',
+          openPlaceChat: openPlaceChat,
+        ),
+      ),
     ];
 
     return WillPopScope(
@@ -150,6 +146,7 @@ class _MainShellState extends State<MainShell> {
         return true;
       },
       child: Scaffold(
+        extendBody: true,
         backgroundColor: context.colors.bg,
         body: IndexedStack(
           index: _currentIndex,
@@ -158,11 +155,11 @@ class _MainShellState extends State<MainShell> {
         bottomNavigationBar: GlassBottomNav(
           currentIndex: _currentIndex,
           onTap: switchToTab,
-          onSearch: () => _openSearch(context),
           items: const [
-            GlassBottomNavItem(icon: Icons.home_filled, label: 'Live'),
+            GlassBottomNavItem(icon: Icons.home_filled, label: 'Start'),
             GlassBottomNavItem(icon: Icons.play_circle_filled, label: 'Stream'),
             GlassBottomNavItem(icon: Icons.person_outline, label: 'Profil'),
+            GlassBottomNavItem(icon: Icons.search, label: 'Suche'),
           ],
         ),
       ),

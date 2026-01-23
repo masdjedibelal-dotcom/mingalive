@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'theme.dart';
 import '../models/place.dart';
@@ -80,7 +81,9 @@ class _DetailScreenState extends State<DetailScreen> {
     
     // Only initialize chat if we have a place
     if (_currentPlace != null) {
-      _initializeChat();
+      if (_currentPlace!.socialEnabled) {
+        _initializeChat();
+      }
       _loadFavoriteStatus(_currentPlace!);
     }
   }
@@ -89,7 +92,9 @@ class _DetailScreenState extends State<DetailScreen> {
   /// Initialize chat for a specific place
   void _initializeChatForPlace(Place place) {
     _currentPlace = place;
-    _initializeChat();
+    if (place.socialEnabled) {
+      _initializeChat();
+    }
     _loadFavoriteStatus(place);
   }
 
@@ -457,14 +462,13 @@ class _DetailScreenState extends State<DetailScreen> {
                         decoration: BoxDecoration(
                           color: MingaTheme.darkOverlay,
                           shape: BoxShape.circle,
-                          border: Border.all(color: MingaTheme.borderStrong),
                         ),
                         child: IconButton(
                           onPressed: _isFavoriteLoading ? null : _toggleFavorite,
                           icon: Icon(
                             _isFavorite ? Icons.favorite : Icons.favorite_border,
                             color: MingaTheme.textPrimary,
-                            size: 16,
+                            size: 18,
                           ),
                           tooltip: _isFavorite ? 'Gespeichert' : 'Speichern',
                         ),
@@ -475,12 +479,11 @@ class _DetailScreenState extends State<DetailScreen> {
                         decoration: BoxDecoration(
                           color: MingaTheme.darkOverlay,
                           shape: BoxShape.circle,
-                          border: Border.all(color: MingaTheme.borderStrong),
                         ),
                         child: IconButton(
                           onPressed: _showAddToFavoritesDialog,
                           icon: Icon(Icons.add,
-                              color: MingaTheme.textPrimary, size: 16),
+                              color: MingaTheme.textPrimary, size: 18),
                           tooltip: 'Zu Collab hinzufügen',
                         ),
                       ),
@@ -519,121 +522,117 @@ class _DetailScreenState extends State<DetailScreen> {
                 ),
               ),
               // Live-Chat Bereich
-              SliverToBoxAdapter(
-                child: Padding(
-                  key: _chatSectionKey,
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Live-Chat', style: MingaTheme.titleSmall),
-                      SizedBox(height: 16),
-                      GlassSurface(
-                        radius: MingaTheme.cardRadius,
-                        blurSigma: 18,
-                        overlayColor: MingaTheme.glassOverlayXSoft,
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxHeight: 400),
-                          child: Column(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: 12,
-                                ),
-                                child: Row(
-                                  children: [
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 8,
-                                        vertical: 4,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: MingaTheme.accentGreenSoft,
-                                        borderRadius: BorderRadius.circular(
-                                          MingaTheme.chipRadius,
+              if (place.socialEnabled)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    key: _chatSectionKey,
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Live-Chat', style: MingaTheme.titleSmall),
+                        SizedBox(height: 16),
+                        GlassSurface(
+                          radius: MingaTheme.cardRadius,
+                          blurSigma: 18,
+                          overlayColor: MingaTheme.glassOverlayXSoft,
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxHeight: 400),
+                            child: Column(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 12,
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                          vertical: 4,
                                         ),
-                                        border: Border.all(
-                                          color: MingaTheme.accentGreen,
-                                          width: 1,
-                                        ),
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Text(
-                                            'LIVE',
-                                            style: MingaTheme.label.copyWith(
-                                              color: MingaTheme.accentGreen,
-                                            ),
+                                        decoration: BoxDecoration(
+                                          color: MingaTheme.accentGreenSoft,
+                                          borderRadius: BorderRadius.circular(
+                                            MingaTheme.chipRadius,
                                           ),
-                                        ],
-                                      ),
-                                    ),
-                                    SizedBox(width: 12),
-                                    if (_liveCount > 0)
-                                      Text(
-                                        '• $_liveCount online',
-                                        style: MingaTheme.textMuted,
-                                      ),
-                                    SizedBox(width: 8),
-                                    Text(
-                                      '• ${_messages.length} ${_messages.length == 1 ? 'Nachricht' : 'Nachrichten'}',
-                                      style: MingaTheme.textMuted,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              Expanded(
-                                child: _isLoadingMessages &&
-                                        !_hasReceivedFirstBatch
-                                    ? Padding(
-                                        padding: EdgeInsets.all(16),
-                                        child: Center(
-                                          child: CircularProgressIndicator(
+                                          border: Border.all(
+                                            color: MingaTheme.accentGreen,
+                                            width: 1,
+                                          ),
+                                        ),
+                                        child: Text(
+                                          'LIVE',
+                                          style: MingaTheme.label.copyWith(
                                             color: MingaTheme.accentGreen,
                                           ),
                                         ),
-                                      )
-                                    : _messages.isEmpty
-                                        ? Padding(
-                                            padding: const EdgeInsets.all(16),
-                                            child: Center(
-                                              child: Text(
-                                                "Noch keine Nachrichten",
-                                                style: MingaTheme.textMuted,
-                                              ),
+                                      ),
+                                      SizedBox(width: 12),
+                                      if (_liveCount > 0)
+                                        Text(
+                                          '• $_liveCount online',
+                                          style: MingaTheme.textMuted,
+                                        ),
+                                      SizedBox(width: 8),
+                                      Text(
+                                        '• ${_messages.length} ${_messages.length == 1 ? 'Nachricht' : 'Nachrichten'}',
+                                        style: MingaTheme.textMuted,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Expanded(
+                                  child: _isLoadingMessages &&
+                                          !_hasReceivedFirstBatch
+                                      ? Padding(
+                                          padding: EdgeInsets.all(16),
+                                          child: Center(
+                                            child: CircularProgressIndicator(
+                                              color: MingaTheme.accentGreen,
                                             ),
-                                          )
-                                        : ListView.builder(
-                                            controller: _chatScrollController,
-                                            shrinkWrap: true,
-                                            padding: const EdgeInsets.fromLTRB(
-                                              16,
-                                              16,
-                                              16,
-                                              16,
-                                            ),
-                                            itemCount: _messages.length > 10
-                                                ? 10
-                                                : _messages.length,
-                                            itemBuilder: (context, index) {
-                                              final reversedIndex =
-                                                  _messages.length - 1 - index;
-                                              final chatMessage =
-                                                  _messages[reversedIndex];
-                                              return _buildChatMessage(
-                                                userId: chatMessage.userId,
-                                                username: chatMessage.userName,
-                                                message: chatMessage.text,
-                                                photoUrl: chatMessage.userAvatar,
-                                                isFromCurrentUser:
-                                                    chatMessage.isMine,
-                                              );
-                                            },
                                           ),
-                              ),
-                              if (place.socialEnabled)
+                                        )
+                                      : _messages.isEmpty
+                                          ? Padding(
+                                              padding: const EdgeInsets.all(16),
+                                              child: Center(
+                                                child: Text(
+                                                  "Noch keine Nachrichten",
+                                                  style: MingaTheme.textMuted,
+                                                ),
+                                              ),
+                                            )
+                                          : ListView.builder(
+                                              controller: _chatScrollController,
+                                              shrinkWrap: true,
+                                              padding: const EdgeInsets.fromLTRB(
+                                                16,
+                                                16,
+                                                16,
+                                                16,
+                                              ),
+                                              itemCount: _messages.length > 10
+                                                  ? 10
+                                                  : _messages.length,
+                                              itemBuilder: (context, index) {
+                                                final reversedIndex =
+                                                    _messages.length - 1 - index;
+                                                final chatMessage =
+                                                    _messages[reversedIndex];
+                                                return _buildChatMessage(
+                                                  userId: chatMessage.userId,
+                                                  username: chatMessage.userName,
+                                                  message: chatMessage.text,
+                                                  photoUrl:
+                                                      chatMessage.userAvatar,
+                                                  isFromCurrentUser:
+                                                      chatMessage.isMine,
+                                                );
+                                              },
+                                            ),
+                                ),
                                 Padding(
                                   padding: const EdgeInsets.fromLTRB(
                                     16,
@@ -644,38 +643,24 @@ class _DetailScreenState extends State<DetailScreen> {
                                   child: Align(
                                     alignment: Alignment.centerRight,
                                     child: TextButton(
-                                      onPressed: () =>
-                                          MainShell.of(context)
-                                              ?.openPlaceChat(place.id),
+                                      onPressed: () => MainShell.of(context)
+                                          ?.openPlaceChat(place.id),
                                       style: TextButton.styleFrom(
                                         foregroundColor: MingaTheme.accentGreen,
                                       ),
                                       child: Text('Chat öffnen'),
                                     ),
                                   ),
-                                )
-                              else
-                                Padding(
-                                  padding: const EdgeInsets.fromLTRB(
-                                    16,
-                                    0,
-                                    16,
-                                    16,
-                                  ),
-                                  child: Text(
-                                    'Live-Chat nur für stark frequentierte Spots verfügbar.',
-                                    style: MingaTheme.bodySmall,
-                                  ),
                                 ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
-                      ),
-                      SizedBox(height: 20),
-                    ],
+                        SizedBox(height: 20),
+                      ],
+                    ),
                   ),
                 ),
-              ),
             ],
           ),
         ],
@@ -685,86 +670,90 @@ class _DetailScreenState extends State<DetailScreen> {
 
   /// Build info card with extended fields (address, status, opening hours, buttons)
   Widget _buildInfoCard(Place place) {
-    return GlassCard(
-      padding: const EdgeInsets.all(20),
-      radius: MingaTheme.cardRadius,
-      blurSigma: 18,
-      overlayColor: MingaTheme.glassOverlay,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Address row (tappable if lat/lng available)
-          if (place.address != null && place.address!.isNotEmpty) ...[
-            GestureDetector(
-              onTap: place.mapsUrl != null
-                  ? () => _openMapsUrl(place.mapsUrl!)
-                  : null,
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(
-                    Icons.location_on,
-                    size: 20,
-                    color: place.lat != null && place.lng != null
-                        ? MingaTheme.accentGreen
-                        : MingaTheme.textSubtle,
+    final rows = <Widget>[];
+    if (place.address != null && place.address!.isNotEmpty) {
+      rows.add(
+        GestureDetector(
+          onTap: place.mapsUrl != null ? () => _openMapsUrl(place.mapsUrl!) : null,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                Icons.location_on,
+                size: 18,
+                color: place.lat != null && place.lng != null
+                    ? MingaTheme.accentGreen
+                    : MingaTheme.textSubtle,
+              ),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  place.address!,
+                  style: MingaTheme.body.copyWith(
+                    color: MingaTheme.textSecondary,
+                    height: 1.4,
                   ),
-                  SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      place.address!,
-                      style: MingaTheme.textMuted.copyWith(
-                        fontSize: 14,
-                        height: 1.4,
-                      ),
-                    ),
-                  ),
-                  if (place.lat != null && place.lng != null)
-                    Icon(
-                      Icons.open_in_new,
-                      size: 16,
-                      color: MingaTheme.accentGreenBorderStrong,
-                    ),
-                ],
+                ),
+              ),
+              if (place.lat != null && place.lng != null)
+                Icon(
+                  Icons.open_in_new,
+                  size: 14,
+                  color: MingaTheme.textSubtle,
+                ),
+            ],
+          ),
+        ),
+      );
+    }
+    if (place.status != null && place.status!.isNotEmpty) {
+      rows.add(
+        Row(
+          children: [
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                color: place.status!.toLowerCase() == 'open' ||
+                        place.status!.toLowerCase() == 'geöffnet'
+                    ? MingaTheme.successGreen
+                    : MingaTheme.dangerRed,
+                shape: BoxShape.circle,
               ),
             ),
-            SizedBox(height: 16),
-          ],
-          // Status row
-          if (place.status != null && place.status!.isNotEmpty) ...[
-            Row(
-              children: [
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                    color: place.status!.toLowerCase() == 'open' || place.status!.toLowerCase() == 'geöffnet'
-                        ? MingaTheme.successGreen
-                        : MingaTheme.dangerRed,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-                SizedBox(width: 8),
-                Text(
-                  place.status!.toLowerCase() == 'open' || place.status!.toLowerCase() == 'geöffnet'
-                      ? 'Geöffnet'
-                      : place.status!,
-                  style: MingaTheme.textMuted.copyWith(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
+            SizedBox(width: 10),
+            Text(
+              place.status!.toLowerCase() == 'open' ||
+                      place.status!.toLowerCase() == 'geöffnet'
+                  ? 'Geöffnet'
+                  : place.status!,
+              style: MingaTheme.body.copyWith(
+                color: MingaTheme.textSecondary,
+                fontWeight: FontWeight.w600,
+              ),
             ),
-            SizedBox(height: 16),
           ],
-          // Opening Hours (collapsible)
-          if (place.openingHoursJson != null && place.openingHoursJson!.isNotEmpty) ...[
-            _buildOpeningHours(place.openingHoursJson!),
-            SizedBox(height: 16),
-          ],
+        ),
+      );
+    }
+    if (place.openingHoursJson != null && place.openingHoursJson!.isNotEmpty) {
+      rows.add(_buildOpeningHours(place.openingHoursJson!));
+    }
+    if (rows.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (var i = 0; i < rows.length; i++) ...[
+          if (i > 0)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Divider(color: MingaTheme.borderSubtle, height: 1),
+            ),
+          rows[i],
         ],
-      ),
+      ],
     );
   }
 
@@ -911,120 +900,83 @@ class _DetailScreenState extends State<DetailScreen> {
     
     // Website chip
     if (place.websiteUrlOrWebsite != null && place.websiteUrlOrWebsite!.isNotEmpty) {
-      actions.add(
-        _buildActionChip(
-          icon: Icons.language,
-          label: 'Website',
-          onTap: () => _openWebsite(place.websiteUrlOrWebsite!),
-        ),
-      );
+      actions.add(_buildActionIcon(
+        icon: Icons.language,
+        label: 'Website',
+        onTap: () => _openWebsite(place.websiteUrlOrWebsite!),
+      ));
     }
     
     // Instagram chip
     if (place.instagramUrlOrInstagram != null && place.instagramUrlOrInstagram!.isNotEmpty) {
-      actions.add(
-        _buildActionChip(
-          icon: Icons.camera_alt,
-          label: 'Instagram',
-          onTap: () => _openInstagram(place.instagramUrlOrInstagram!),
-        ),
-      );
+      actions.add(_buildActionIcon(
+        icon: FontAwesomeIcons.instagram,
+        label: 'Instagram',
+        onTap: () => _openInstagram(place.instagramUrlOrInstagram!),
+      ));
     }
     
     // Route chip (Google Maps)
     if (place.mapsUrl != null) {
-      actions.add(
-        _buildActionChip(
-          icon: Icons.directions,
-          label: 'Route',
-          onTap: () => _openMapsUrl(place.mapsUrl!),
-        ),
-      );
+      actions.add(_buildActionIcon(
+        icon: Icons.directions,
+        label: 'Route',
+        onTap: () => _openMapsUrl(place.mapsUrl!),
+      ));
     }
     
     // Call chip
     if (place.phone != null && place.phone!.isNotEmpty) {
-      actions.add(
-        _buildActionChip(
-          icon: Icons.phone,
-          label: 'Anrufen',
-          onTap: () => _callPhone(place.phone!),
-        ),
-      );
+      actions.add(_buildActionIcon(
+        icon: Icons.phone,
+        label: 'Anrufen',
+        onTap: () => _callPhone(place.phone!),
+      ));
     }
     
     if (actions.isEmpty) {
       return SizedBox.shrink();
     }
     
-    return GlassCard(
-      padding: const EdgeInsets.all(20),
-      radius: 20,
-      blurSigma: 18,
-      overlayColor: MingaTheme.glassOverlay,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Infos',
-            style: MingaTheme.titleMedium,
-          ),
-          SizedBox(height: 16),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: actions,
-          ),
-        ],
-      ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Infos',
+          style: MingaTheme.titleMedium,
+        ),
+        SizedBox(height: 12),
+        Wrap(
+          spacing: 16,
+          runSpacing: 12,
+          children: actions,
+        ),
+      ],
     );
   }
   
-  /// Build a single action chip
-  Widget _buildActionChip({
+  /// Build a single action icon button (no border)
+  Widget _buildActionIcon({
     required IconData icon,
     required String label,
     required VoidCallback onTap,
   }) {
-    return Material(
-      color: MingaTheme.transparent,
+    return Tooltip(
+      message: label,
       child: InkWell(
-        borderRadius: BorderRadius.circular(MingaTheme.radiusMd),
         onTap: onTap,
-        child: GlassSurface(
-          radius: MingaTheme.radiusMd,
-          blurSigma: 16,
-          overlayColor: MingaTheme.glassOverlay,
-          borderColor: MingaTheme.accentGreenBorder,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                GlassSurface(
-                  radius: 10,
-                  blurSigma: 12,
-                  overlayColor: MingaTheme.accentGreenSoft,
-                  borderColor: MingaTheme.accentGreenBorder,
-                  child: Padding(
-                    padding: const EdgeInsets.all(6),
-                    child: Icon(
-                      icon,
-                      size: 16,
-                      color: MingaTheme.accentGreen,
-                    ),
-                  ),
-                ),
-                SizedBox(width: 10),
-                Text(
-                  label,
-                  style: MingaTheme.body.copyWith(
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.2,
-                  ),
-                ),
-              ],
-            ),
+        borderRadius: BorderRadius.circular(999),
+        child: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: MingaTheme.glassOverlayXXSoft,
+            shape: BoxShape.circle,
+          ),
+          child: Icon(
+            icon,
+            size: 20,
+            color: MingaTheme.textPrimary,
           ),
         ),
       ),

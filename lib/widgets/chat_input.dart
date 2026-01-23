@@ -6,7 +6,6 @@ import '../services/supabase_chat_repository.dart';
 import '../services/supabase_gate.dart';
 import '../theme/app_theme_extensions.dart';
 import '../theme/app_tokens.dart';
-import '../widgets/glass/glass_surface.dart';
 
 /// Chat input widget with TextField and Send button
 /// Always visible, keyboard-safe, no overlays
@@ -158,79 +157,71 @@ class _ChatInputState extends State<ChatInput> {
     final isEnabled = widget.enabled && isLoggedIn;
     final tokens = context.tokens;
 
-    return GlassSurface(
-      radius: tokens.radius.sm,
-      blur: tokens.blur.med,
-      scrim: tokens.colors.bg.withOpacity(0.78),
-      borderColor: tokens.colors.transparent,
-      child: Padding(
-        padding: EdgeInsets.symmetric(
-          horizontal: tokens.space.s12,
-          vertical: tokens.space.s8,
-        ),
-        child: SafeArea(
-          top: false,
-          bottom: false,
-          child: Row(
-            children: [
-              Expanded(
-                child: GlassSurface(
-                  radius: tokens.radius.lg,
-                  blur: tokens.blur.low,
-                  scrim: isEnabled
-                      ? tokens.colors.bg.withOpacity(0.7)
-                      : tokens.colors.bg.withOpacity(0.5),
-                  borderColor: tokens.colors.border,
-                  child: TextField(
-                    controller: _controller,
-                    focusNode: _focusNode,
-                    enabled: isEnabled,
-                    style: tokens.type.body.copyWith(
-                      color: tokens.colors.textPrimary,
-                    ),
-                    decoration: InputDecoration(
-                      hintText: widget.placeholder ?? 'Schreib etwas…',
-                      hintStyle: tokens.type.caption.copyWith(
-                        color: tokens.colors.textMuted,
-                      ),
-                      filled: true,
-                      fillColor: tokens.colors.transparent,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(tokens.radius.lg),
-                        borderSide: BorderSide.none,
-                      ),
-                      contentPadding: EdgeInsets.symmetric(
-                        horizontal: tokens.space.s12,
-                        vertical: tokens.space.s8,
-                      ),
-                    ),
-                    maxLines: null,
-                    textInputAction: TextInputAction.send,
-                    onSubmitted: (_) => _handleSend(),
+    return Padding(
+      padding: EdgeInsets.symmetric(
+        horizontal: tokens.space.s12,
+        vertical: tokens.space.s8,
+      ),
+      child: SafeArea(
+        top: false,
+        bottom: false,
+        child: Row(
+          children: [
+            Expanded(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: tokens.colors.surfaceStrong.withOpacity(0.9),
+                  borderRadius: BorderRadius.circular(tokens.radius.pill),
+                ),
+                child: TextField(
+                  controller: _controller,
+                  focusNode: _focusNode,
+                  enabled: isEnabled,
+                  style: tokens.type.body.copyWith(
+                    color: tokens.colors.textPrimary,
                   ),
+                  decoration: InputDecoration(
+                    hintText: widget.placeholder ?? 'Schreib etwas…',
+                    hintStyle: tokens.type.caption.copyWith(
+                      color: tokens.colors.textMuted,
+                    ),
+                    filled: true,
+                    fillColor: tokens.colors.transparent,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(tokens.radius.pill),
+                      borderSide: BorderSide.none,
+                    ),
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: tokens.space.s12,
+                      vertical: tokens.space.s8,
+                    ),
+                  ),
+                  maxLines: null,
+                  textInputAction: TextInputAction.send,
+                  onSubmitted: (_) => _handleSend(),
                 ),
               ),
-              SizedBox(width: tokens.space.s8),
-              _buildIconAction(
-                tokens: tokens,
-                icon: Icons.photo_camera,
-                isLoading: _isUploading,
-                onTap: (isEnabled && !_isUploading) ? _handlePickImage : null,
-                color: isEnabled
-                    ? tokens.colors.textSecondary
-                    : tokens.colors.textMuted,
-              ),
-              SizedBox(width: tokens.space.s8),
-              _buildIconAction(
-                tokens: tokens,
-                icon: Icons.send,
-                onTap: (isEnabled && !_isUploading) ? _handleSend : null,
-                color: isEnabled
-                    ? tokens.colors.accent
-                    : tokens.colors.accent.withOpacity(0.4),
-              ),
-            ],
-          ),
+            ),
+            SizedBox(width: tokens.space.s8),
+            _buildIconAction(
+              tokens: tokens,
+              icon: Icons.photo_camera,
+              isLoading: _isUploading,
+              onTap: (isEnabled && !_isUploading) ? _handlePickImage : null,
+              color: isEnabled
+                  ? tokens.colors.textPrimary
+                  : tokens.colors.textMuted,
+            ),
+            SizedBox(width: tokens.space.s8),
+            _buildIconAction(
+              tokens: tokens,
+              icon: Icons.send,
+              onTap: (isEnabled && !_isUploading) ? _handleSend : null,
+              color: isEnabled
+                  ? tokens.colors.accent
+                  : tokens.colors.accent.withOpacity(0.4),
+            ),
+          ],
         ),
       ),
     );
@@ -245,9 +236,13 @@ class _ChatInputState extends State<ChatInput> {
   }) {
     return GestureDetector(
       onTap: onTap,
-      child: SizedBox(
-        width: tokens.space.s32,
-        height: tokens.space.s32,
+      child: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: tokens.colors.surfaceStrong.withOpacity(0.9),
+          shape: BoxShape.circle,
+        ),
         child: Center(
           child: isLoading
               ? SizedBox(
@@ -260,7 +255,7 @@ class _ChatInputState extends State<ChatInput> {
                 )
               : Icon(
                   icon,
-                  size: tokens.space.s16,
+                  size: tokens.space.s20,
                   color: color,
                 ),
         ),

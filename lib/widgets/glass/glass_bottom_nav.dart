@@ -15,14 +15,12 @@ class GlassBottomNavItem {
 class GlassBottomNav extends StatelessWidget {
   final int currentIndex;
   final ValueChanged<int> onTap;
-  final VoidCallback? onSearch;
   final List<GlassBottomNavItem> items;
 
   const GlassBottomNav({
     super.key,
     required this.currentIndex,
     required this.onTap,
-    this.onSearch,
     required this.items,
   });
 
@@ -42,22 +40,25 @@ class GlassBottomNav extends StatelessWidget {
       ),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final tabBar = GlassSurface(
-            radius: tokens.nav.radius,
-            blur: tokens.nav.blur,
-            scrim: tokens.colors.transparent,
-            borderColor: tokens.colors.border,
-            boxShadow: tokens.shadow.med,
+          return GlassSurface(
+            radius: tokens.radius.pill,
+            blurEnabled: true,
+            blur: tokens.blur.low,
+            scrim: const Color(0xFF121212).withOpacity(0.9),
+            borderColor: const Color(0x0DFFFFFF),
+            boxShadow: const [],
             child: SizedBox(
-              height: tokens.nav.bottomBarHeight,
+              height: 62,
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: List.generate(visibleIndices.length, (index) {
                   final itemIndex = visibleIndices[index];
                   final item = items[itemIndex];
                   final isSelected = itemIndex == currentIndex;
-                  final activeFill = tokens.colors.accent.withOpacity(0.2);
-                  final activeBorder = tokens.colors.accent.withOpacity(0.5);
+                  final activeFill = tokens.colors.surfaceStrong;
+                  final labelColor = isSelected
+                      ? tokens.colors.accent
+                      : tokens.colors.textSecondary;
 
                   return Expanded(
                     child: GestureDetector(
@@ -73,22 +74,35 @@ class GlassBottomNav extends StatelessWidget {
                               ? activeFill
                               : tokens.colors.transparent,
                           borderRadius:
-                              BorderRadius.circular(tokens.radius.sm),
+                              BorderRadius.circular(tokens.radius.pill),
                           border: Border.all(
-                            color: isSelected
-                                ? activeBorder
-                                : tokens.colors.transparent,
+                            color: tokens.colors.transparent,
                           ),
                         ),
                         child: Center(
                           child: Semantics(
                             label: item.label,
-                            child: Icon(
-                              item.icon,
-                              size: tokens.space.s20,
-                              color: isSelected
-                                  ? tokens.colors.textPrimary
-                                  : tokens.colors.textSecondary,
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  item.icon,
+                                  size: tokens.space.s20,
+                                  color: labelColor,
+                                ),
+                                SizedBox(height: tokens.space.s2),
+                                Text(
+                                  item.label,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: tokens.type.caption.copyWith(
+                                    color: labelColor,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ),
@@ -98,32 +112,6 @@ class GlassBottomNav extends StatelessWidget {
                 }),
               ),
             ),
-          );
-
-          return Row(
-            children: [
-              Expanded(child: tabBar),
-              SizedBox(width: tokens.space.s12),
-              GestureDetector(
-                onTap: onSearch,
-                child: GlassSurface(
-                  radius: tokens.nav.radius,
-                  blur: tokens.nav.blur,
-                  scrim: tokens.colors.transparent,
-                  borderColor: tokens.colors.border,
-                  boxShadow: tokens.shadow.med,
-                  child: SizedBox(
-                    height: tokens.nav.bottomBarHeight,
-                    width: tokens.nav.bottomBarHeight,
-                    child: Icon(
-                      Icons.search,
-                      size: tokens.space.s20,
-                      color: tokens.colors.textPrimary,
-                    ),
-                  ),
-                ),
-              ),
-            ],
           );
         },
       ),

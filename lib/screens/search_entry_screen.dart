@@ -1,17 +1,14 @@
 import 'package:flutter/material.dart';
 import 'theme.dart';
 import '../data/place_repository.dart';
-import '../models/place.dart';
 import '../services/search_router.dart';
 import '../services/gpt_search_suggestions_service.dart';
-import '../services/supabase_gate.dart';
 import 'detail_screen.dart';
 import 'list_screen.dart';
 import 'main_shell.dart';
 import 'trip_plan_screen.dart';
 import '../screens/categories_screen.dart';
 import '../widgets/glass/glass_card.dart';
-import '../widgets/glass/glass_chip.dart';
 
 class SearchEntryScreen extends StatefulWidget {
   final String kind;
@@ -31,32 +28,6 @@ class SearchEntryScreen extends StatefulWidget {
   State<SearchEntryScreen> createState() => _SearchEntryScreenState();
 }
 
-class _UseCaseRule {
-  final String title;
-  final String query;
-  final List<String> keywords;
-  final bool isTopSpots;
-
-  const _UseCaseRule({
-    required this.title,
-    required this.query,
-    required this.keywords,
-    this.isTopSpots = false,
-  });
-}
-
-class _UseCaseSuggestion {
-  final String title;
-  final String query;
-  final List<Place> places;
-
-  const _UseCaseSuggestion({
-    required this.title,
-    required this.query,
-    required this.places,
-  });
-}
-
 class _SearchEntryScreenState extends State<SearchEntryScreen>
     with SingleTickerProviderStateMixin {
   final TextEditingController _controller = TextEditingController();
@@ -71,8 +42,6 @@ class _SearchEntryScreenState extends State<SearchEntryScreen>
   late final List<String> _kinds;
   bool _isLoadingGpt = false;
   List<GptSearchSuggestion> _gptSuggestions = const [];
-  bool _isLoadingUseCases = false;
-  List<_UseCaseSuggestion> _useCaseSuggestions = const [];
 
   @override
   void initState() {
@@ -85,7 +54,6 @@ class _SearchEntryScreenState extends State<SearchEntryScreen>
     _tabController.index = initialIndex;
     _tabController.addListener(_handleTabChanged);
     _loadGptSuggestions();
-    _loadUseCaseSuggestions();
     _applyInitialQuery();
   }
 
@@ -225,7 +193,6 @@ class _SearchEntryScreenState extends State<SearchEntryScreen>
       _activeKind = kind;
     });
     _loadGptSuggestions();
-    _loadUseCaseSuggestions();
   }
 
   Future<void> _loadGptSuggestions() async {
@@ -239,128 +206,7 @@ class _SearchEntryScreenState extends State<SearchEntryScreen>
       _isLoadingGpt = false;
     });
   }
-
-  Future<void> _loadUseCaseSuggestions() async {
-    setState(() {
-      _isLoadingUseCases = true;
-    });
-    final places = await _fetchUseCasePlaces();
-    if (!mounted) return;
-    final suggestions = _buildUseCaseSuggestions(places);
-    setState(() {
-      _useCaseSuggestions = suggestions;
-      _isLoadingUseCases = false;
-    });
-  }
-
-  Future<List<Place>> _fetchUseCasePlaces() async {
-    if (SupabaseGate.isEnabled) {
-      try {
-        final remote =
-            await _repository.fetchPlacesPage(offset: 0, limit: 200);
-        if (remote.isNotEmpty) {
-          return remote;
-        }
-      } catch (_) {}
-    }
-    return _repository.getAllPlaces();
-  }
-
-  List<_UseCaseSuggestion> _buildUseCaseSuggestions(List<Place> places) {
-    final filtered = places
-        .where((place) =>
-            _activeKind.isEmpty ||
-            place.kind == _activeKind ||
-            place.kind == null)
-        .toList();
-    final rules = const [
-      _UseCaseRule(
-        title: 'Pizza',
-        query: 'Pizza',
-        keywords: ['pizza'],
-      ),
-      _UseCaseRule(
-        title: 'Ramen',
-        query: 'Ramen',
-        keywords: ['ramen'],
-      ),
-      _UseCaseRule(
-        title: 'Biergarten',
-        query: 'Biergarten',
-        keywords: ['biergarten', 'beer', 'brau'],
-      ),
-      _UseCaseRule(
-        title: 'Parks',
-        query: 'Parks',
-        keywords: ['park', 'garten'],
-      ),
-      _UseCaseRule(
-        title: 'Seen',
-        query: 'Seen',
-        keywords: ['see', 'lake'],
-      ),
-      _UseCaseRule(
-        title: 'Was trinken gehen',
-        query: 'Drinks',
-        keywords: ['bar', 'cocktail', 'drinks', 'pub'],
-      ),
-      _UseCaseRule(
-        title: 'Party',
-        query: 'Party',
-        keywords: ['club', 'party', 'night'],
-      ),
-      _UseCaseRule(
-        title: 'Top Spots',
-        query: 'Top Spots',
-        keywords: [],
-        isTopSpots: true,
-      ),
-    ];
-
-    final suggestions = <_UseCaseSuggestion>[];
-    for (final rule in rules) {
-      final matches = rule.isTopSpots
-          ? filtered
-          : filtered.where((place) => _matchesRule(place, rule)).toList();
-      if (matches.isEmpty) continue;
-      matches.sort(_comparePlaces);
-      suggestions.add(
-        _UseCaseSuggestion(
-          title: rule.title,
-          query: rule.query,
-          places: matches.take(3).toList(),
-        ),
-      );
-    }
-
-    return suggestions;
-  }
-
-  bool _matchesRule(Place place, _UseCaseRule rule) {
-    if (rule.keywords.isEmpty) return true;
-    final haystack = [
-      place.name,
-      place.category,
-      ...place.tags,
-    ].map((value) => value.toLowerCase()).toList();
-    for (final keyword in rule.keywords) {
-      final lower = keyword.toLowerCase();
-      if (haystack.any((value) => value.contains(lower))) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  int _comparePlaces(Place a, Place b) {
-    final ratingCountCompare = b.ratingCount.compareTo(a.ratingCount);
-    if (ratingCountCompare != 0) return ratingCountCompare;
-    final ratingCompare = b.rating.compareTo(a.rating);
-    if (ratingCompare != 0) return ratingCompare;
-    final distanceA = a.distanceKm ?? double.infinity;
-    final distanceB = b.distanceKm ?? double.infinity;
-    return distanceA.compareTo(distanceB);
-  }
+  // Use-cases intentionally removed; only "Vorschläge" remain.
 
   @override
   Widget build(BuildContext context) {
@@ -487,45 +333,6 @@ class _SearchEntryScreenState extends State<SearchEntryScreen>
                         ),
                       ),
                     SizedBox(height: 16),
-                    Text(
-                      'Use‑Cases',
-                      style: MingaTheme.label,
-                    ),
-                    SizedBox(height: 10),
-                    if (_isLoadingUseCases)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 6),
-                        child: SizedBox(
-                          height: 26,
-                          child: Center(
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: MingaTheme.textSecondary,
-                            ),
-                          ),
-                        ),
-                      )
-                    else if (_useCaseSuggestions.isNotEmpty)
-                      SizedBox(
-                        height: 44,
-                        child: ListView.separated(
-                          scrollDirection: Axis.horizontal,
-                          itemCount: _useCaseSuggestions.length,
-                          separatorBuilder: (_, __) =>
-                              const SizedBox(width: 10),
-                          itemBuilder: (context, index) {
-                            final suggestion = _useCaseSuggestions[index];
-                            return GestureDetector(
-                              onTap: () => _runSearch(suggestion.query),
-                              child: GlassChip(
-                                label: suggestion.title,
-                                selected: false,
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                    SizedBox(height: 16),
                   ],
                 ),
               ),
@@ -535,20 +342,33 @@ class _SearchEntryScreenState extends State<SearchEntryScreen>
               delegate: _SearchTabBarDelegate(
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-                  child: GlassSurface(
-                    radius: MingaTheme.pillRadius,
-                    blurSigma: 16,
-                    overlayColor: MingaTheme.glassOverlayXSoft,
-                    child: TabBar(
-                      controller: _tabController,
-                      indicatorColor: MingaTheme.accentGreen,
-                      labelColor: MingaTheme.textPrimary,
-                      unselectedLabelColor: MingaTheme.textSubtle,
-                      tabs: const [
-                        Tab(text: 'Essen & Trinken'),
-                        Tab(text: 'Places'),
-                      ],
+                  child: TabBar(
+                    controller: _tabController,
+                    isScrollable: true,
+                    padding: EdgeInsets.zero,
+                    labelPadding: const EdgeInsets.only(right: 18),
+                    tabAlignment: TabAlignment.start,
+                    indicator: UnderlineTabIndicator(
+                      borderSide: BorderSide(
+                        color: MingaTheme.accentGreen,
+                        width: 2,
+                      ),
+                      insets: const EdgeInsets.only(bottom: 2),
                     ),
+                    indicatorSize: TabBarIndicatorSize.label,
+                    labelColor: MingaTheme.textPrimary,
+                    unselectedLabelColor: MingaTheme.textSubtle,
+                    labelStyle: MingaTheme.body.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                    unselectedLabelStyle: MingaTheme.body.copyWith(
+                      fontWeight: FontWeight.w500,
+                    ),
+                    dividerColor: Colors.transparent,
+                    tabs: const [
+                      Tab(text: 'Essen & Trinken'),
+                      Tab(text: 'Places'),
+                    ],
                   ),
                 ),
               ),

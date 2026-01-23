@@ -54,6 +54,73 @@ class _CategoriesViewState extends State<CategoriesView> {
   List<String>? _allCategories;
   List<String>? _filteredCategories;
   bool _isLoading = true;
+  Map<String, IconData> _iconByCategory = {};
+  static const _fallbackIcons = [
+    Icons.local_dining,
+    Icons.local_pizza,
+    Icons.local_cafe,
+    Icons.ramen_dining,
+    Icons.icecream,
+    Icons.bakery_dining,
+    Icons.local_bar,
+    Icons.park,
+    Icons.museum,
+    Icons.storefront,
+    Icons.nightlife,
+    Icons.local_florist,
+    Icons.emoji_nature,
+    Icons.spa,
+    Icons.shopping_bag,
+    Icons.map,
+    Icons.nightlife,
+    Icons.park,
+    Icons.museum,
+    Icons.storefront,
+    Icons.local_florist,
+    Icons.emoji_nature,
+    Icons.sports_soccer,
+    Icons.sports_basketball,
+    Icons.sports_tennis,
+    Icons.fitness_center,
+    Icons.pool,
+    Icons.terrain,
+    Icons.water,
+    Icons.castle,
+    Icons.church,
+    Icons.attractions,
+    Icons.theater_comedy,
+    Icons.movie,
+    Icons.music_note,
+    Icons.art_track,
+    Icons.casino,
+    Icons.cake,
+    Icons.local_drink,
+    Icons.breakfast_dining,
+    Icons.icecream,
+    Icons.set_meal,
+    Icons.dining,
+    Icons.lunch_dining,
+    Icons.local_bar,
+    Icons.bakery_dining,
+    Icons.shopping_cart,
+    Icons.spa,
+    Icons.pets,
+    Icons.landscape,
+    Icons.map_outlined,
+    Icons.travel_explore,
+  ];
+  static const _tilePalettes = [
+    [Color(0xFF1D2B64), Color(0xFF1A3F8B)],
+    [Color(0xFF145A32), Color(0xFF1D8348)],
+    [Color(0xFF512E5F), Color(0xFF6C3483)],
+    [Color(0xFF7B241C), Color(0xFF922B21)],
+    [Color(0xFF0B5345), Color(0xFF117864)],
+    [Color(0xFF512E2E), Color(0xFF784212)],
+    [Color(0xFF1B4F72), Color(0xFF21618C)],
+    [Color(0xFF4A235A), Color(0xFF5B2C6F)],
+    [Color(0xFF3D3B40), Color(0xFF4C4A4F)],
+    [Color(0xFF12343B), Color(0xFF2A4F55)],
+  ];
 
   @override
   void initState() {
@@ -100,6 +167,7 @@ class _CategoriesViewState extends State<CategoriesView> {
         setState(() {
           _allCategories = sortedCategories;
           _filteredCategories = sortedCategories;
+          _iconByCategory = _buildIconMap(sortedCategories);
           _isLoading = false;
         });
       }
@@ -108,46 +176,83 @@ class _CategoriesViewState extends State<CategoriesView> {
         setState(() {
           _allCategories = [];
           _filteredCategories = [];
+          _iconByCategory = {};
           _isLoading = false;
         });
       }
     }
   }
 
-  IconData _getCategoryIcon(String category) {
-    final upperCategory = category.toUpperCase();
-    switch (upperCategory) {
-      case 'RAMEN':
-        return Icons.ramen_dining;
-      case 'BIERGARTEN':
-        return Icons.local_bar;
-      case 'EVENTS':
-        return Icons.event;
-      case 'KAFFEE':
-      case 'CAFE':
-      case 'COFFEE':
-        return Icons.local_cafe;
-      case 'RESTAURANT':
-        return Icons.restaurant;
-      case 'PIZZA':
-        return Icons.local_pizza;
-      case 'BURGER':
-        return Icons.lunch_dining;
-      case 'ICE_CREAM':
-      case 'EIS':
-        return Icons.icecream;
-      case 'MUSEUM':
-        return Icons.museum;
-      case 'PARK':
-        return Icons.park;
-      case 'CHURCH':
-      case 'KIRCHE':
-        return Icons.church;
-      case 'MONUMENT':
-        return Icons.account_tree;
-      default:
-        return widget.kind == 'sight' ? Icons.place : Icons.restaurant_menu;
+  _CategoryStyle _getCategoryStyle(String category) {
+    final palette =
+        _tilePalettes[category.hashCode.abs() % _tilePalettes.length];
+    final icon = _iconByCategory[category] ??
+        (widget.kind == 'sight' ? Icons.place : Icons.category);
+    return _CategoryStyle(icon: icon, colors: palette);
+  }
+
+  Map<String, IconData> _buildIconMap(List<String> categories) {
+    final overrides = <String, IconData>{
+      'RAMEN': Icons.ramen_dining,
+      'BIERGARTEN': Icons.local_bar,
+      'EVENTS': Icons.event,
+      'KAFFEE': Icons.local_cafe,
+      'CAFE': Icons.local_cafe,
+      'COFFEE': Icons.local_cafe,
+      'RESTAURANT': Icons.restaurant,
+      'PIZZA': Icons.local_pizza,
+      'BURGER': Icons.lunch_dining,
+      'ICE_CREAM': Icons.icecream,
+      'EIS': Icons.icecream,
+      'MUSEUM': Icons.museum,
+      'PARK': Icons.park,
+      'CHURCH': Icons.church,
+      'KIRCHE': Icons.church,
+      'MONUMENT': Icons.account_tree,
+      'BAR': Icons.local_bar,
+      'DRINKS': Icons.local_bar,
+      'COCKTAIL': Icons.local_bar,
+      'SUSHI': Icons.set_meal,
+      'STEAK': Icons.dining,
+      'FRÜHSTÜCK': Icons.free_breakfast,
+      'BREAKFAST': Icons.free_breakfast,
+      'DESSERT': Icons.cake,
+      'BAKERY': Icons.bakery_dining,
+      'BACKEN': Icons.bakery_dining,
+      'SHOPPING': Icons.shopping_bag,
+      'MARKT': Icons.storefront,
+      'MARKET': Icons.storefront,
+      'AUSSICHT': Icons.landscape,
+      'VIEWPOINT': Icons.landscape,
+      'NIGHTLIFE': Icons.nightlife,
+      'CLUB': Icons.nightlife,
+      'WANDERN': Icons.terrain,
+      'HIKING': Icons.terrain,
+      'SEE': Icons.water,
+      'LAKE': Icons.water,
+      'ZOO': Icons.pets,
+      'FLOWERS': Icons.local_florist,
+      'BLUMEN': Icons.local_florist,
+    };
+    final used = <IconData>{...overrides.values};
+    final icons = _fallbackIcons.where((icon) => !used.contains(icon)).toList();
+    var iconIndex = 0;
+    final mapping = <String, IconData>{};
+    for (final category in categories) {
+      final key = category.toUpperCase();
+      final override = overrides[key];
+      if (override != null) {
+        mapping[category] = override;
+        continue;
+      }
+      if (iconIndex < icons.length) {
+        mapping[category] = icons[iconIndex];
+        iconIndex += 1;
+      } else {
+        mapping[category] = Icons.category;
+      }
     }
+    return mapping;
   }
 
   @override
@@ -213,66 +318,92 @@ class _CategoriesViewState extends State<CategoriesView> {
                       )
                     : GridView.builder(
                         padding: const EdgeInsets.symmetric(horizontal: 20),
-                      gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          crossAxisSpacing: 16,
-                          mainAxisSpacing: 16,
-                          childAspectRatio: 1.2,
+                        gridDelegate:
+                            const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 3,
+                          crossAxisSpacing: 12,
+                          mainAxisSpacing: 12,
+                          childAspectRatio: 0.78,
                         ),
                         itemCount: _filteredCategories!.length,
                         itemBuilder: (context, index) {
                           final category = _filteredCategories![index];
-                    return GestureDetector(
-                      onTap: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (context) => ListScreen(
-                              categoryName: category,
-                                  kind: widget.kind,
-                                  openPlaceChat: (placeId) {
-                                    MainShell.of(context)?.openPlaceChat(placeId);
-                                  },
-                            ),
-                          ),
-                        );
-                      },
-                      child: GlassSurface(
-                        radius: 20,
-                        blurSigma: 16,
-                        overlayColor: MingaTheme.glassOverlayXSoft,
-                        boxShadow: MingaTheme.cardShadow,
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              _getCategoryIcon(category),
-                              size: 48,
-                              color: MingaTheme.accentGreen,
-                            ),
-                            SizedBox(height: 12),
-                            Padding(
-                                  padding:
-                                      const EdgeInsets.symmetric(horizontal: 12),
-                              child: Text(
-                                category.toUpperCase(),
-                                style: MingaTheme.label.copyWith(
-                                  color: MingaTheme.textPrimary,
+                          final style = _getCategoryStyle(category);
+                          return GestureDetector(
+                            onTap: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (context) => ListScreen(
+                                    categoryName: category,
+                                    kind: widget.kind,
+                                    openPlaceChat: (placeId) {
+                                      MainShell.of(context)
+                                          ?.openPlaceChat(placeId);
+                                    },
+                                  ),
                                 ),
-                                textAlign: TextAlign.center,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                              ),
+                              );
+                            },
+                              child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: Container(
+                                    width: double.infinity,
+                                    decoration: BoxDecoration(
+                                      borderRadius:
+                                          BorderRadius.circular(20),
+                                      gradient: LinearGradient(
+                                        begin: Alignment.topLeft,
+                                        end: Alignment.bottomRight,
+                                        colors: style.colors,
+                                      ),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withOpacity(0.22),
+                                          blurRadius: 12,
+                                          offset: const Offset(0, 6),
+                                        ),
+                                      ],
+                                    ),
+                                    child: Center(
+                                      child: Icon(
+                                        style.icon,
+                                          size: 38,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    category,
+                                    style: MingaTheme.body.copyWith(
+                                      color: MingaTheme.textPrimary,
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 12,
+                                    ),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                              ],
                             ),
-                          ],
-                        ),
+                          );
+                        },
                       ),
-                    );
-                  },
-                ),
           ),
         ],
     );
   }
+}
+
+class _CategoryStyle {
+  final IconData icon;
+  final List<Color> colors;
+
+  const _CategoryStyle({
+    required this.icon,
+    required this.colors,
+  });
 }
 

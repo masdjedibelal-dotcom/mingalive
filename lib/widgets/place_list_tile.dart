@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
 import '../models/place.dart';
 import '../theme/app_theme_extensions.dart';
-import 'place_distance_text.dart';
 import 'place_image.dart';
-import '../widgets/glass/glass_surface.dart';
+import '../widgets/place_distance_text.dart';
 
 class PlaceListTile extends StatelessWidget {
   final Place place;
@@ -33,115 +32,116 @@ class PlaceListTile extends StatelessWidget {
         ? _truncate(noteText, 120)
         : noteText;
 
-    return GestureDetector(
-      onTap: onTap,
-      child: GlassSurface(
-        radius: tokens.radius.lg,
-        blur: tokens.blur.med,
-        scrim: tokens.card.glassOverlay,
-        borderColor: tokens.colors.border,
+    return Material(
+      color: tokens.colors.transparent,
+      child: InkWell(
+        onTap: onTap,
         child: Padding(
-          padding: EdgeInsets.all(tokens.space.s12),
+          padding: EdgeInsets.symmetric(vertical: tokens.space.s6),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(tokens.radius.md),
-              child: SizedBox(
-                width: 74,
-                height: 74,
-                child: PlaceImage(
-                  imageUrl: place.imageUrl,
-                  fit: BoxFit.cover,
-                ),
+              PlaceImage(
+                imageUrl: place.imageUrl,
+                width: 76,
+                height: 76,
+                fit: BoxFit.cover,
+                borderRadius: tokens.radius.sm,
               ),
-            ),
-            SizedBox(width: tokens.space.s12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    place.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: tokens.type.title.copyWith(
-                      color: tokens.colors.textPrimary,
-                    ),
-                  ),
-                  SizedBox(height: tokens.space.s6),
-                  Text(
-                    place.category,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: tokens.type.caption.copyWith(
-                      color: tokens.colors.textMuted,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  if (place.distanceKm != null) ...[
-                    SizedBox(height: tokens.space.s4),
-                    PlaceDistanceText(distanceKm: place.distanceKm),
-                  ],
-                  if (hasNote) ...[
-                    SizedBox(height: tokens.space.s6),
+              SizedBox(width: tokens.space.s12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                     Text(
-                      previewText,
-                      maxLines: isNoteExpanded ? 6 : 2,
+                      place.name,
+                      maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: tokens.type.caption.copyWith(
-                        color: tokens.colors.textSecondary,
-                        height: 1.3,
+                      style: tokens.type.title.copyWith(
+                        color: tokens.colors.textPrimary,
+                        fontSize: 16,
                       ),
                     ),
-                    if (showToggle) ...[
-                      SizedBox(height: tokens.space.s4),
+                    SizedBox(height: tokens.space.s6),
+                    PlaceDistanceText(
+                      distanceKm: place.distanceKm,
+                      style: tokens.type.caption.copyWith(
+                        color: tokens.colors.textMuted,
+                        fontSize: 12,
+                      ),
+                    ),
+                    SizedBox(height: tokens.space.s6),
+                    Text(
+                      _buildMetaLine(place),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: tokens.type.caption.copyWith(
+                        color: tokens.colors.textMuted,
+                        fontSize: 12,
+                      ),
+                    ),
+                    if (hasNote) ...[
+                      SizedBox(height: tokens.space.s6),
+                      Text(
+                        previewText,
+                        maxLines: isNoteExpanded ? 6 : 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: tokens.type.caption.copyWith(
+                          color: tokens.colors.textSecondary,
+                          height: 1.3,
+                        ),
+                      ),
+                      if (showToggle) ...[
+                        SizedBox(height: tokens.space.s4),
+                        GestureDetector(
+                          onTap: onToggleNote,
+                          child: Text(
+                            isNoteExpanded ? 'Weniger' : 'Weiterlesen',
+                            style: tokens.type.caption.copyWith(
+                              color: tokens.colors.textPrimary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                    if (onEditNote != null) ...[
+                      SizedBox(height: tokens.space.s6),
                       GestureDetector(
-                        onTap: onToggleNote,
+                        onTap: onEditNote,
                         child: Text(
-                          isNoteExpanded ? 'Weniger' : 'Weiterlesen',
+                          hasNote
+                              ? 'Beschreibung bearbeiten'
+                              : 'Beschreibung hinzufügen',
                           style: tokens.type.caption.copyWith(
-                            color: tokens.colors.textPrimary,
+                            color: tokens.colors.accent,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
                       ),
                     ],
                   ],
-                  if (onEditNote != null) ...[
-                    SizedBox(height: tokens.space.s6),
-                    GestureDetector(
-                      onTap: onEditNote,
-                      child: GlassSurface(
-                        radius: tokens.radius.sm,
-                        blur: tokens.blur.low,
-                        scrim: tokens.card.glassOverlay,
-                        borderColor: tokens.colors.border,
-                        padding: EdgeInsets.symmetric(
-                          horizontal: tokens.space.s8,
-                          vertical: tokens.space.s4,
-                        ),
-                        child: Text(
-                          hasNote ? 'Notiz bearbeiten' : 'Notiz hinzufügen',
-                          style: tokens.type.caption.copyWith(
-                            color: tokens.colors.textPrimary,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
+                ),
               ),
-            ),
-            Icon(
-              Icons.chevron_right,
-              color: tokens.colors.textMuted,
-            ),
             ],
           ),
         ),
       ),
     );
+  }
+
+  String _buildMetaLine(Place place) {
+    final parts = <String>[];
+    final category = place.category.trim();
+    if (category.isNotEmpty) {
+      parts.add(category);
+    }
+    final kind = place.kind?.trim() ?? '';
+    if (kind.isNotEmpty && !parts.contains(kind)) {
+      parts.add(kind);
+    }
+    if (parts.isEmpty) return '';
+    return parts.join(' · ');
   }
 
   String _truncate(String text, int maxChars) {

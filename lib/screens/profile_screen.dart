@@ -103,16 +103,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               );
             }
 
-            return Padding(
-              padding: const EdgeInsets.all(20.0),
-              child: Column(
-                children: [
-                  Expanded(
-                    child: _buildLoggedInView(context, currentUser),
-                  ),
-                ],
-              ),
-            );
+            return _buildLoggedInView(context, currentUser);
           },
         ),
       ),
@@ -270,9 +261,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
         return DefaultTabController(
           length: 4,
-          child: Column(
-            children: [
-              SizedBox(height: 20),
+          child: Builder(
+            builder: (context) {
+              final tabController = DefaultTabController.of(context);
+              return SingleChildScrollView(
+                physics: const BouncingScrollPhysics(),
+                child: Padding(
+                  padding: const EdgeInsets.all(20.0),
+                  child: Column(
+                    children: [
+                      SizedBox(height: 20),
               // Avatar
               GestureDetector(
                 onTap: _isEditing ? () => _pickAvatar(currentUser.id) : null,
@@ -439,258 +437,306 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ],
                 ],
               ),
+              SizedBox(height: 8),
+              TextButton(
+                onPressed: () async {
+                  await AuthService.instance.signOut();
+                },
+                child: Text(
+                  'Logout',
+                  style: MingaTheme.bodySmall.copyWith(
+                    color: MingaTheme.textSubtle,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
               SizedBox(height: 20),
-              FutureBuilder<List<List<Collab>>>(
-                future: Future.wait([
-                  collabsRepository.fetchCollabsByOwner(
-                    ownerId: currentUser.id,
-                    isPublic: true,
-                  ),
-                  collabsRepository.fetchCollabsByOwner(
-                    ownerId: currentUser.id,
-                    isPublic: false,
-                  ),
-                  collabsRepository.fetchSavedCollabs(userId: currentUser.id),
-                ]),
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    return Padding(
-                      padding: EdgeInsets.all(24.0),
-                      child: CircularProgressIndicator(
-                        color: MingaTheme.accentGreen,
-                      ),
-                    );
-                  }
-
-                  if (snapshot.hasError) {
-                    return Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Text(
-                        'Fehler beim Laden der Collabs',
-                        style: MingaTheme.textMuted,
-                      ),
-                    );
-                  }
-
-                  final results = snapshot.data ?? [[], [], []];
-                  final publicCollabs = results[0];
-                  final privateCollabs = results[1];
-                  final savedCollabs = results[2];
-
-                  final allCollabs = [
-                    ...publicCollabs,
-                    ...privateCollabs,
-                    ...savedCollabs,
-                  ];
-                  final saveCountsFuture = allCollabs.isEmpty
-                      ? Future.value(<String, int>{})
-                      : collabsRepository.fetchCollabSaveCounts(
-                          allCollabs.map((collab) => collab.id).toList(),
-                        );
-
-                  return FutureBuilder<Map<String, int>>(
-                    future: saveCountsFuture,
-                    builder: (context, saveSnapshot) {
-                      final saveCounts = saveSnapshot.data ?? {};
-                      final totalSaves = publicCollabs.fold<int>(
-                        0,
-                        (sum, collab) => sum + (saveCounts[collab.id] ?? 0),
-                      );
-                      final badgeLabels = _buildBadgeLabels(
-                        publicCount: publicCollabs.length,
-                        totalSaves: totalSaves,
-                        hasRecent: _hasRecentCollab(
-                          publicCollabs,
-                          const Duration(days: 30),
-                        ),
-                      );
-
-                      return Expanded(
-                        child: Column(
-                          children: [
-                            if (badgeLabels.isNotEmpty) ...[
-                              _buildBadgesRow(badgeLabels),
-                              SizedBox(height: 16),
-                            ],
-                            TabBar(
-                              indicatorColor: MingaTheme.accentGreen,
-                              labelColor: MingaTheme.textPrimary,
-                              unselectedLabelColor:
-                                  MingaTheme.textSubtle,
-                              labelStyle: MingaTheme.bodySmall.copyWith(
-                                fontWeight: FontWeight.w600,
+                      FutureBuilder<List<List<Collab>>>(
+                        future: Future.wait([
+                          collabsRepository.fetchCollabsByOwner(
+                            ownerId: currentUser.id,
+                            isPublic: true,
+                          ),
+                          collabsRepository.fetchCollabsByOwner(
+                            ownerId: currentUser.id,
+                            isPublic: false,
+                          ),
+                          collabsRepository.fetchSavedCollabs(userId: currentUser.id),
+                        ]),
+                        builder: (context, snapshot) {
+                          if (snapshot.connectionState == ConnectionState.waiting) {
+                            return Padding(
+                              padding: EdgeInsets.all(24.0),
+                              child: CircularProgressIndicator(
+                                color: MingaTheme.accentGreen,
                               ),
-                              tabs: const [
-                                Tab(text: 'Meine Collabs (Public)'),
-                                Tab(text: 'Meine Collabs (Private)'),
-                                Tab(text: 'Gespeicherte Collabs'),
-                                Tab(text: 'Gespeicherte Orte'),
-                              ],
-                            ),
-                            SizedBox(height: 12),
-                            Expanded(
-                              child: TabBarView(
+                            );
+                          }
+
+                          if (snapshot.hasError) {
+                            return Padding(
+                              padding: const EdgeInsets.all(16.0),
+                              child: Text(
+                                'Fehler beim Laden der Collabs',
+                                style: MingaTheme.textMuted,
+                              ),
+                            );
+                          }
+
+                          final results = snapshot.data ?? [[], [], []];
+                          final publicCollabs = results[0];
+                          final privateCollabs = results[1];
+                          final savedCollabs = results[2];
+
+                          final allCollabs = [
+                            ...publicCollabs,
+                            ...privateCollabs,
+                            ...savedCollabs,
+                          ];
+                          final saveCountsFuture = allCollabs.isEmpty
+                              ? Future.value(<String, int>{})
+                              : collabsRepository.fetchCollabSaveCounts(
+                                  allCollabs.map((collab) => collab.id).toList(),
+                                );
+
+                          return FutureBuilder<Map<String, int>>(
+                            future: saveCountsFuture,
+                            builder: (context, saveSnapshot) {
+                              final saveCounts = saveSnapshot.data ?? {};
+                              final totalSaves = publicCollabs.fold<int>(
+                                0,
+                                (sum, collab) => sum + (saveCounts[collab.id] ?? 0),
+                              );
+                              final badgeLabels = _buildBadgeLabels(
+                                publicCount: publicCollabs.length,
+                                totalSaves: totalSaves,
+                                hasRecent: _hasRecentCollab(
+                                  publicCollabs,
+                                  const Duration(days: 30),
+                                ),
+                              );
+
+                              return Column(
                                 children: [
-                                  CollabGrid(
-                                    collabs: publicCollabs,
-                                    creatorName: (_) => currentUser.name,
-                                    creatorAvatarUrl: (_) => currentUser.photoUrl,
-                                    creatorId: (collab) => collab.ownerId,
-                                    saveCounts: saveCounts,
-                                    emptyText:
-                                        'Öffentliche Collabs sind für alle sichtbar und können entdeckt werden.',
-                                    onCollabTap: (collab) => _openCollabDetail(
-                                      publicCollabs,
-                                      publicCollabs.indexOf(collab),
+                                  if (badgeLabels.isNotEmpty) ...[
+                                    _buildBadgesRow(badgeLabels),
+                                    SizedBox(height: 16),
+                                  ],
+                                  TabBar(
+                                    isScrollable: true,
+                                    tabAlignment: TabAlignment.start,
+                                    indicatorColor: MingaTheme.accentGreen,
+                                    indicatorSize: TabBarIndicatorSize.label,
+                                    dividerColor: Colors.transparent,
+                                    labelColor: MingaTheme.textPrimary,
+                                    unselectedLabelColor:
+                                        MingaTheme.textSubtle,
+                                    labelStyle: MingaTheme.bodySmall.copyWith(
+                                      fontWeight: FontWeight.w600,
                                     ),
-                                    onCreatorTap: (collab) {
-                                      Navigator.of(context).push(
-                                        MaterialPageRoute(
-                                          builder: (context) =>
-                                              CreatorProfileScreen(
-                                            userId: collab.ownerId,
-                                          ),
-                                        ),
-                                      );
-                                    },
-                                    showEditIcon: (collab) =>
-                                        collab.ownerId == currentUser.id,
-                                    onEditTap: (collab) async {
-                                      await Navigator.of(context).push(
-                                        MaterialPageRoute(
-                                          builder: (context) => CollabEditScreen(
-                                            collabId: collab.id,
-                                            ownerId: collab.ownerId,
-                                            initialTitle: collab.title,
-                                            initialDescription:
-                                                collab.description ?? '',
-                                            initialIsPublic: collab.isPublic,
-                                          ),
-                                        ),
-                                      );
-                                      _refreshProfile(currentUser.id);
-                                    },
+                                    tabs: const [
+                                      Tab(text: 'Meine Collabs (Public)'),
+                                      Tab(text: 'Meine Collabs (Private)'),
+                                      Tab(text: 'Gespeicherte Collabs'),
+                                      Tab(text: 'Gespeicherte Orte'),
+                                    ],
                                   ),
-                                  CollabGrid(
-                                    collabs: privateCollabs,
-                                    creatorName: (_) => currentUser.name,
-                                    creatorAvatarUrl: (_) => currentUser.photoUrl,
-                                    creatorId: (collab) => collab.ownerId,
-                                    saveCounts: saveCounts,
-                                    emptyText:
-                                        'Private Collabs siehst nur du, sie bleiben verborgen.',
-                                    onCollabTap: (collab) => _openCollabDetail(
-                                      privateCollabs,
-                                      privateCollabs.indexOf(collab),
-                                    ),
-                                    onCreatorTap: (collab) {
-                                      Navigator.of(context).push(
-                                        MaterialPageRoute(
-                                          builder: (context) =>
-                                              CreatorProfileScreen(
-                                            userId: collab.ownerId,
-                                          ),
-                                        ),
-                                      );
-                                    },
-                                    showEditIcon: (collab) =>
-                                        collab.ownerId == currentUser.id,
-                                    onEditTap: (collab) async {
-                                      await Navigator.of(context).push(
-                                        MaterialPageRoute(
-                                          builder: (context) => CollabEditScreen(
-                                            collabId: collab.id,
-                                            ownerId: collab.ownerId,
-                                            initialTitle: collab.title,
-                                            initialDescription:
-                                                collab.description ?? '',
-                                            initialIsPublic: collab.isPublic,
-                                          ),
-                                        ),
-                                      );
-                                      _refreshProfile(currentUser.id);
-                                    },
-                                  ),
-                                  CollabGrid(
-                                    collabs: savedCollabs,
-                                    creatorName: (_) => '',
-                                    creatorAvatarUrl: (_) => null,
-                                    creatorId: (collab) => collab.ownerId,
-                                    saveCounts: saveCounts,
-                                    emptyText:
-                                        'Gespeicherte Collabs sind Sammlungen, denen du folgst.',
-                                    onCollabTap: (collab) => _openCollabDetail(
-                                      savedCollabs,
-                                      savedCollabs.indexOf(collab),
-                                    ),
-                                    onCreatorTap: (collab) {
-                                      Navigator.of(context).push(
-                                        MaterialPageRoute(
-                                          builder: (context) =>
-                                              CreatorProfileScreen(
-                                            userId: collab.ownerId,
-                                          ),
-                                        ),
-                                      );
-                                    },
-                                    showEditIcon: (_) => false,
-                                  ),
-                                  FutureBuilder<List<Place>>(
-                                    future: placeRepository.fetchFavorites(
-                                      userId: currentUser.id,
-                                    ),
-                                    builder: (context, placesSnapshot) {
-                                      if (placesSnapshot.connectionState ==
-                                          ConnectionState.waiting) {
-                                        return Center(
-                                          child: CircularProgressIndicator(
-                                            color: MingaTheme.accentGreen,
-                                          ),
-                                        );
-                                      }
-
-                                      if (placesSnapshot.hasError) {
-                                        return Center(
-                                          child: Text(
-                                            'Fehler beim Laden der Orte',
-                                            style: MingaTheme.bodySmall.copyWith(
-                                              color: MingaTheme.textSubtle,
+                                  SizedBox(height: 12),
+                                  AnimatedBuilder(
+                                    animation: tabController,
+                                    builder: (context, _) {
+                                      switch (tabController.index) {
+                                        case 0:
+                                          return CollabGrid(
+                                            collabs: publicCollabs,
+                                            creatorName: (_) => currentUser.name,
+                                            creatorAvatarUrl: (_) =>
+                                                currentUser.photoUrl,
+                                            creatorId: (collab) => collab.ownerId,
+                                            saveCounts: saveCounts,
+                                            emptyText:
+                                                'Öffentliche Collabs sind für alle sichtbar und können entdeckt werden.',
+                                            onCollabTap: (collab) =>
+                                                _openCollabDetail(
+                                              publicCollabs,
+                                              publicCollabs.indexOf(collab),
                                             ),
-                                          ),
-                                        );
-                                      }
-
-                                      return PlaceGrid(
-                                        places: placesSnapshot.data ?? [],
-                                        emptyText:
-                                            'Gespeicherte Orte sind deine persönlichen Favoriten.',
-                                        onPlaceTap: (place) {
-                                          Navigator.of(context).push(
-                                            MaterialPageRoute(
-                                              builder: (context) => DetailScreen(
-                                                place: place,
-                                                openPlaceChat: (placeId) {
-                                                  MainShell.of(context)
-                                                      ?.openPlaceChat(placeId);
-                                                },
-                                              ),
-                                            ),
+                                            onCreatorTap: (collab) {
+                                              Navigator.of(context).push(
+                                                MaterialPageRoute(
+                                                  builder: (context) =>
+                                                      CreatorProfileScreen(
+                                                    userId: collab.ownerId,
+                                                  ),
+                                                ),
+                                              );
+                                            },
+                                            showEditIcon: (collab) =>
+                                                collab.ownerId == currentUser.id,
+                                            onEditTap: (collab) async {
+                                              await Navigator.of(context).push(
+                                                MaterialPageRoute(
+                                                  builder: (context) =>
+                                                      CollabEditScreen(
+                                                    collabId: collab.id,
+                                                    ownerId: collab.ownerId,
+                                                    initialTitle: collab.title,
+                                                    initialDescription:
+                                                        collab.description ?? '',
+                                                    initialIsPublic:
+                                                        collab.isPublic,
+                                                  ),
+                                                ),
+                                              );
+                                              _refreshProfile(currentUser.id);
+                                            },
+                                            shrinkWrap: true,
+                                            physics:
+                                                const NeverScrollableScrollPhysics(),
                                           );
-                                        },
-                                      );
+                                        case 1:
+                                          return CollabGrid(
+                                            collabs: privateCollabs,
+                                            creatorName: (_) => currentUser.name,
+                                            creatorAvatarUrl: (_) =>
+                                                currentUser.photoUrl,
+                                            creatorId: (collab) => collab.ownerId,
+                                            saveCounts: saveCounts,
+                                            emptyText:
+                                                'Private Collabs siehst nur du, sie bleiben verborgen.',
+                                            onCollabTap: (collab) =>
+                                                _openCollabDetail(
+                                              privateCollabs,
+                                              privateCollabs.indexOf(collab),
+                                            ),
+                                            onCreatorTap: (collab) {
+                                              Navigator.of(context).push(
+                                                MaterialPageRoute(
+                                                  builder: (context) =>
+                                                      CreatorProfileScreen(
+                                                    userId: collab.ownerId,
+                                                  ),
+                                                ),
+                                              );
+                                            },
+                                            showEditIcon: (collab) =>
+                                                collab.ownerId == currentUser.id,
+                                            onEditTap: (collab) async {
+                                              await Navigator.of(context).push(
+                                                MaterialPageRoute(
+                                                  builder: (context) =>
+                                                      CollabEditScreen(
+                                                    collabId: collab.id,
+                                                    ownerId: collab.ownerId,
+                                                    initialTitle: collab.title,
+                                                    initialDescription:
+                                                        collab.description ?? '',
+                                                    initialIsPublic:
+                                                        collab.isPublic,
+                                                  ),
+                                                ),
+                                              );
+                                              _refreshProfile(currentUser.id);
+                                            },
+                                            shrinkWrap: true,
+                                            physics:
+                                                const NeverScrollableScrollPhysics(),
+                                          );
+                                        case 2:
+                                          return CollabGrid(
+                                            collabs: savedCollabs,
+                                            creatorName: (_) => '',
+                                            creatorAvatarUrl: (_) => null,
+                                            creatorId: (collab) => collab.ownerId,
+                                            saveCounts: saveCounts,
+                                            emptyText:
+                                                'Gespeicherte Collabs sind Sammlungen, denen du folgst.',
+                                            onCollabTap: (collab) =>
+                                                _openCollabDetail(
+                                              savedCollabs,
+                                              savedCollabs.indexOf(collab),
+                                            ),
+                                            onCreatorTap: (collab) {
+                                              Navigator.of(context).push(
+                                                MaterialPageRoute(
+                                                  builder: (context) =>
+                                                      CreatorProfileScreen(
+                                                    userId: collab.ownerId,
+                                                  ),
+                                                ),
+                                              );
+                                            },
+                                            showEditIcon: (_) => false,
+                                            shrinkWrap: true,
+                                            physics:
+                                                const NeverScrollableScrollPhysics(),
+                                          );
+                                        case 3:
+                                          return FutureBuilder<List<Place>>(
+                                            future: placeRepository.fetchFavorites(
+                                              userId: currentUser.id,
+                                            ),
+                                            builder: (context, placesSnapshot) {
+                                              if (placesSnapshot.connectionState ==
+                                                  ConnectionState.waiting) {
+                                                return Center(
+                                                  child: CircularProgressIndicator(
+                                                    color: MingaTheme.accentGreen,
+                                                  ),
+                                                );
+                                              }
+
+                                              if (placesSnapshot.hasError) {
+                                                return Center(
+                                                  child: Text(
+                                                    'Fehler beim Laden der Orte',
+                                                    style: MingaTheme.bodySmall
+                                                        .copyWith(
+                                                      color: MingaTheme.textSubtle,
+                                                    ),
+                                                  ),
+                                                );
+                                              }
+
+                                              return PlaceGrid(
+                                                places: placesSnapshot.data ?? [],
+                                                emptyText:
+                                                    'Gespeicherte Orte sind deine persönlichen Favoriten.',
+                                                onPlaceTap: (place) {
+                                                  Navigator.of(context).push(
+                                                    MaterialPageRoute(
+                                                      builder: (context) =>
+                                                          DetailScreen(
+                                                        place: place,
+                                                        openPlaceChat: (placeId) {
+                                                          MainShell.of(context)
+                                                              ?.openPlaceChat(placeId);
+                                                        },
+                                                      ),
+                                                    ),
+                                                  );
+                                                },
+                                                shrinkWrap: true,
+                                                physics: const NeverScrollableScrollPhysics(),
+                                              );
+                                            },
+                                          );
+                                        default:
+                                          return const SizedBox.shrink();
+                                      }
                                     },
                                   ),
                                 ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  );
-                },
-              ),
-            ],
+                              );
+                            },
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
           ),
         );
       },

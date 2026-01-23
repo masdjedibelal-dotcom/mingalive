@@ -4,9 +4,14 @@ import '../services/auth_service.dart';
 import '../services/supabase_collabs_repository.dart';
 import '../services/supabase_profile_repository.dart';
 import '../services/supabase_gate.dart';
+import '../data/place_repository.dart';
 import '../widgets/collab_card.dart';
+import '../data/system_collabs.dart';
+import '../models/collab.dart';
+import '../models/place.dart';
 import 'collab_detail_screen.dart';
 import 'creator_profile_screen.dart';
+import 'collab_create_screen.dart';
 
 enum CollabsExploreFilter { popular, newest, following }
 
@@ -27,12 +32,14 @@ class _CollabsExploreScreenState extends State<CollabsExploreScreen> {
       SupabaseCollabsRepository();
   final SupabaseProfileRepository _profileRepository =
       SupabaseProfileRepository();
+  final PlaceRepository _placeRepository = PlaceRepository();
   bool _isLoading = true;
   CollabsExploreFilter _activeFilter = CollabsExploreFilter.popular;
   final Map<String, int> _saveCounts = {};
   final Map<String, UserProfile> _creatorProfiles = {};
   List<Collab> _publicCollabs = [];
   List<Collab> _savedCollabs = [];
+  final Map<String, List<String>> _fallbackMediaByCollabId = {};
 
   @override
   void initState() {
@@ -42,15 +49,24 @@ class _CollabsExploreScreenState extends State<CollabsExploreScreen> {
   }
 
   Future<void> _loadData() async {
-    if (!SupabaseGate.isEnabled) {
-      setState(() {
-        _isLoading = false;
-      });
-      return;
-    }
-
     try {
+      final systemCollabs = await SystemCollabsStore.load();
+      final systemAsCollabs = _mapSystemCollabs(systemCollabs);
+
+      if (!SupabaseGate.isEnabled) {
+        if (mounted) {
+          setState(() {
+            _publicCollabs = systemAsCollabs;
+            _savedCollabs = [];
+            _isLoading = false;
+          });
+        }
+        await _loadFallbackMediaForCollabs();
+        return;
+      }
+
       _publicCollabs = await _collabsRepository.fetchPublicCollabs();
+      _publicCollabs = [...systemAsCollabs, ..._publicCollabs];
 
       final currentUser = AuthService.instance.currentUser;
       if (currentUser != null) {
@@ -81,6 +97,7 @@ class _CollabsExploreScreenState extends State<CollabsExploreScreen> {
         _isLoading = false;
       });
     }
+    await _loadFallbackMediaForCollabs();
   }
 
   List<Collab> get _filteredCollabs {
@@ -117,6 +134,20 @@ class _CollabsExploreScreenState extends State<CollabsExploreScreen> {
           'Collabs entdecken',
           style: MingaTheme.titleMedium,
         ),
+        actions: [
+          TextButton.icon(
+            onPressed: _openCreateCollab,
+            icon: Icon(Icons.add, color: MingaTheme.accentGreen),
+            label: Text(
+              'Erstellen',
+              style: MingaTheme.body.copyWith(
+                color: MingaTheme.accentGreen,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+        ],
       ),
       body: Column(
         children: [
@@ -174,7 +205,16 @@ class _CollabsExploreScreenState extends State<CollabsExploreScreen> {
                           final collab = collabs[index];
                           final profile = _creatorProfiles[collab.ownerId];
                           final username = profile?.name ?? 'Unbekannt';
-                          final mediaUrls = collab.coverMediaUrls;
+                          final fallbackUrls =
+                              _fallbackMediaByCollabId[collab.id] ?? const [];
+                          final mediaUrls = collab.coverMediaUrls.isNotEmpty
+                              ? collab.coverMediaUrls
+                              : fallbackUrls;
+                          final imageUrl = collab.coverMediaUrls.isNotEmpty
+                              ? null
+                              : (fallbackUrls.isNotEmpty
+                                  ? fallbackUrls.first
+                                  : null);
                           final collabIds =
                               collabs.map((item) => item.id).toList();
                           return CollabCard(
@@ -184,7 +224,7 @@ class _CollabsExploreScreenState extends State<CollabsExploreScreen> {
                             creatorId: collab.ownerId,
                             creatorBadge: profile?.badge,
                             mediaUrls: mediaUrls,
-                            imageUrl: mediaUrls.isNotEmpty ? mediaUrls.first : null,
+                            imageUrl: imageUrl,
                             gradientKey: 'mint',
                             onCreatorTap: () {
                               Navigator.of(context).push(
@@ -219,6 +259,105 @@ class _CollabsExploreScreenState extends State<CollabsExploreScreen> {
     setState(() {
       _activeFilter = filter;
     });
+  }
+
+  List<Collab> _mapSystemCollabs(List<CollabDefinition> defs) {
+    final now = DateTime.now();
+    return defs.asMap().entries.map((entry) {
+      final index = entry.key;
+      final def = entry.value;
+      return Collab(
+        id: def.id,
+        ownerId: 'localspots',
+        title: def.title,
+        description: def.subtitle,
+        isPublic: true,
+        coverMediaUrls: const [],
+        createdAt: now.subtract(Duration(minutes: index)),
+        creatorDisplayName: 'LocalSpots',
+        creatorUsername: 'LocalSpots',
+        creatorAvatarUrl: null,
+        creatorBadge: null,
+      );
+    }).toList();
+  }
+
+  Future<void> _loadFallbackMediaForCollabs() async {
+    final collabs = List<Collab>.from(_publicCollabs);
+    if (collabs.isEmpty) return;
+    final updated = Map<String, List<String>>.from(_fallbackMediaByCollabId);
+
+    for (final collab in collabs) {
+      if (collab.coverMediaUrls.isNotEmpty) continue;
+      if (updated.containsKey(collab.id)) continue;
+      final systemDef = SystemCollabsStore.findById(collab.id);
+      List<Place> places = [];
+      if (systemDef != null) {
+        places = await _placeRepository.fetchPlacesForCollab(systemDef);
+      } else {
+        final placeIds =
+            await _collabsRepository.fetchCollabPlaceIds(collabId: collab.id);
+        if (placeIds.isEmpty) continue;
+        places = await _placeRepository.fetchPlacesByIds(placeIds);
+        places = _orderPlacesByIds(places, placeIds);
+      }
+
+      final urls = _extractPlaceImages(places);
+      if (urls.isNotEmpty) {
+        updated[collab.id] = urls;
+      }
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _fallbackMediaByCollabId
+        ..clear()
+        ..addAll(updated);
+    });
+  }
+
+  List<Place> _orderPlacesByIds(List<Place> places, List<String> ids) {
+    final map = {for (final place in places) place.id: place};
+    return ids.map((id) => map[id]).whereType<Place>().toList();
+  }
+
+  List<String> _extractPlaceImages(List<Place> places) {
+    final urls = <String>[];
+    for (final place in places) {
+      final url = place.imageUrl.trim();
+      if (url.isEmpty) continue;
+      urls.add(url);
+      if (urls.length >= 5) break;
+    }
+    return urls;
+  }
+
+  Future<void> _openCreateCollab() async {
+    final currentUser = AuthService.instance.currentUser;
+    if (currentUser == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Bitte einloggen, um einen Collab zu erstellen.'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
+    final created = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (context) => const CollabCreateScreen(),
+      ),
+    );
+    if (!mounted || created != true) return;
+    setState(() {
+      _isLoading = true;
+      _publicCollabs = [];
+      _savedCollabs = [];
+      _saveCounts.clear();
+      _creatorProfiles.clear();
+    });
+    await _loadData();
   }
 
 

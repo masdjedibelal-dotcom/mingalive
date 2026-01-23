@@ -23,6 +23,9 @@ import '../widgets/media/media_viewer.dart';
 import '../widgets/glass/glass_button.dart';
 import '../widgets/glass/glass_text_field.dart';
 import '../widgets/glass/glass_bottom_sheet.dart';
+import '../data/system_collabs.dart';
+import '../theme/app_theme_extensions.dart';
+import '../theme/app_tokens.dart';
 import 'add_spots_to_collab_sheet.dart';
 import 'detail_screen.dart';
 import 'main_shell.dart';
@@ -95,6 +98,8 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
   final Map<String, Map<String, String>> _localNotesByCollabId = {};
   final Map<String, Map<String, String>> _supabaseNotesByCollabId = {};
   final Set<String> _expandedNoteKeys = {};
+  bool _isSystemLoading = true;
+  final Map<String, List<String>> _fallbackMediaByCollabId = {};
 
   @override
   void initState() {
@@ -112,6 +117,7 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
       _loadCollabDataFor(collabId);
     }
     _loadFollowStateFor(_collabIds[_currentIndex]);
+    _loadSystemCollabs();
   }
 
   @override
@@ -144,7 +150,17 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
         return collab;
       }
     }
+    final system = SystemCollabsStore.findById(id);
+    if (system != null) return system;
     return null;
+  }
+
+  Future<void> _loadSystemCollabs() async {
+    await SystemCollabsStore.load();
+    if (!mounted) return;
+    setState(() {
+      _isSystemLoading = false;
+    });
   }
 
   Future<void> _loadFollowStateFor(String collabId) async {
@@ -191,14 +207,17 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
     final title = _titleOverrides[collabId] ?? collab.title;
     final description = _descriptionOverrides[collabId] ?? collab.subtitle;
     final mediaItems = _mediaItemsById[collabId] ?? const [];
+    final fallbackUrls = _fallbackMediaByCollabId[collabId] ?? const [];
 
     return SizedBox(
       height: 260,
       child: Stack(
         children: [
           Positioned.fill(
-            child: _buildMediaCarousel(
+            child: _buildHeroMedia(
+              collabId: collabId,
               items: mediaItems,
+              fallbackUrls: fallbackUrls,
               gradientKey: 'mint',
             ),
           ),
@@ -763,6 +782,12 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
       );
     }
 
+    if (_isSystemLoading) {
+      return Center(
+        child: CircularProgressIndicator(color: MingaTheme.accentGreen),
+      );
+    }
+
     final collab = _collabDataById[collabId];
     if (collab == null) {
       return _buildMissingCollab();
@@ -802,14 +827,17 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
     final username = _creatorLabel(_displayNameForProfile(creatorProfile));
     final avatarUrl = creatorProfile?.avatarUrl?.trim();
     final mediaItems = _mediaItemsById[collabId] ?? [];
+    final fallbackUrls = _fallbackMediaByCollabId[collabId] ?? const [];
 
     return SizedBox(
       height: 260,
       child: Stack(
         children: [
           Positioned.fill(
-            child: _buildMediaCarousel(
+            child: _buildHeroMedia(
+              collabId: collabId,
               items: mediaItems,
+              fallbackUrls: fallbackUrls,
               gradientKey: 'mint',
             ),
           ),
@@ -914,6 +942,7 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
         final payload = snapshot.data;
         final places = payload?.places ?? [];
         final notes = payload?.notes ?? {};
+        _scheduleFallbackUpdate(collabId, places);
         if (places.isEmpty) {
           return Center(
             child: Text(
@@ -928,12 +957,18 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
         final limitedPlaces =
             places.length > 20 ? places.take(20).toList() : places;
 
+        final ownerId = _collabDataById[collabId]?.ownerId;
+        final canEditNotes =
+            ownerId != null && _isOwnerById(ownerId);
         return ListView.separated(
           padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
           itemCount: limitedPlaces.length,
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
-          separatorBuilder: (_, __) => SizedBox(height: 12),
+          separatorBuilder: (_, __) => Divider(
+            color: MingaTheme.borderSubtle,
+            height: 24,
+          ),
           itemBuilder: (context, index) {
             final place = limitedPlaces[index];
             return PlaceListTile(
@@ -942,12 +977,14 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
               isNoteExpanded:
                   _expandedNoteKeys.contains(_noteKey(collabId, place.id)),
               onToggleNote: () => _toggleNote(collabId, place.id),
-              onEditNote: () => _showPlaceNoteSheet(
-                collabId: collabId,
-                placeId: place.id,
-                initialNote: notes[place.id],
-                isSupabase: true,
-              ),
+              onEditNote: canEditNotes
+                  ? () => _showPlaceNoteSheet(
+                        collabId: collabId,
+                        placeId: place.id,
+                        initialNote: notes[place.id],
+                        isSupabase: true,
+                      )
+                  : null,
               onTap: () {
                 Navigator.of(context).push(
                   MaterialPageRoute(
@@ -992,6 +1029,7 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
     final notes =
         await _collabsRepository.fetchCollabPlaceNotes(collabId: collabId);
     _supabaseNotesByCollabId[collabId] = notes;
+    _updateFallbackMedia(collabId, places);
     return _CollabPlacesPayload(places: places, notes: notes);
   }
 
@@ -1041,6 +1079,98 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
     );
   }
 
+  Widget _buildFallbackCarousel({
+    required List<String> urls,
+    String? gradientKey,
+  }) {
+    final carouselItems = urls
+        .map((url) => MediaCarouselItem(url: url, isVideo: false))
+        .toList();
+    return MediaCarousel(
+      items: carouselItems,
+      gradientKey: gradientKey,
+    );
+  }
+
+  Widget _buildHeroMedia({
+    required String collabId,
+    required List<CollabMediaItem> items,
+    required List<String> fallbackUrls,
+    String? gradientKey,
+  }) {
+    if (items.isNotEmpty) {
+      return _buildMediaCarousel(items: items, gradientKey: gradientKey);
+    }
+    if (fallbackUrls.isNotEmpty) {
+      return _buildFallbackCarousel(
+        urls: fallbackUrls,
+        gradientKey: gradientKey,
+      );
+    }
+    return Container(
+      decoration: BoxDecoration(
+        gradient: _gradientForKey(
+          context.tokens.gradients,
+          gradientKey,
+        ),
+      ),
+    );
+  }
+
+  LinearGradient _gradientForKey(AppGradientTokens gradients, String? key) {
+    switch (key) {
+      case 'calm':
+        return gradients.calm;
+      case 'sunset':
+        return gradients.sunset;
+      case 'deep':
+        return gradients.deep;
+      case 'mint':
+      default:
+        return gradients.mint;
+    }
+  }
+
+  void _updateFallbackMedia(String collabId, List<Place> places) {
+    final urls = _extractPlaceImages(places);
+    if (urls.isEmpty) return;
+    final current = _fallbackMediaByCollabId[collabId] ?? const [];
+    if (_listEquals(current, urls)) return;
+    _fallbackMediaByCollabId[collabId] = urls;
+  }
+
+  void _scheduleFallbackUpdate(String collabId, List<Place> places) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final urls = _extractPlaceImages(places);
+      if (urls.isEmpty) return;
+      final current = _fallbackMediaByCollabId[collabId] ?? const [];
+      if (_listEquals(current, urls)) return;
+      setState(() {
+        _fallbackMediaByCollabId[collabId] = urls;
+      });
+    });
+  }
+
+  List<String> _extractPlaceImages(List<Place> places) {
+    final urls = <String>[];
+    for (final place in places) {
+      final url = place.imageUrl.trim();
+      if (url.isEmpty) continue;
+      urls.add(url);
+      if (urls.length >= 5) break;
+    }
+    return urls;
+  }
+
+  bool _listEquals(List<String> a, List<String> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+
   Widget _buildPlacesList(CollabDefinition collab) {
     return FutureBuilder<List<Place>>(
       future: _repository.fetchPlacesForCollab(collab),
@@ -1069,13 +1199,18 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
             ? places.take(collab.limit).toList()
             : places;
         final notes = _localNotesByCollabId[collab.id] ?? {};
+        _scheduleFallbackUpdate(collab.id, limitedPlaces);
 
+        final canEditNotes = _isOwnerById(collab.creatorId);
         return ListView.separated(
           padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
           itemCount: limitedPlaces.length,
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
-          separatorBuilder: (_, __) => SizedBox(height: 12),
+          separatorBuilder: (_, __) => Divider(
+            color: MingaTheme.borderSubtle,
+            height: 24,
+          ),
           itemBuilder: (context, index) {
             final place = limitedPlaces[index];
             return PlaceListTile(
@@ -1084,12 +1219,14 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
               isNoteExpanded:
                   _expandedNoteKeys.contains(_noteKey(collab.id, place.id)),
               onToggleNote: () => _toggleNote(collab.id, place.id),
-              onEditNote: () => _showPlaceNoteSheet(
-                collabId: collab.id,
-                placeId: place.id,
-                initialNote: notes[place.id],
-                isSupabase: false,
-              ),
+              onEditNote: canEditNotes
+                  ? () => _showPlaceNoteSheet(
+                        collabId: collab.id,
+                        placeId: place.id,
+                        initialNote: notes[place.id],
+                        isSupabase: false,
+                      )
+                  : null,
               onTap: () {
                 Navigator.of(context).push(
                   MaterialPageRoute(
@@ -1142,7 +1279,7 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
             Row(
               children: [
                 Expanded(
-                  child: Text('Notiz', style: MingaTheme.titleSmall),
+                  child: Text('Beschreibung', style: MingaTheme.titleSmall),
                 ),
                 IconButton(
                   icon: Icon(Icons.close, color: MingaTheme.textSecondary),
@@ -1154,7 +1291,7 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
             GlassTextField(
               controller: controller,
               focusNode: focusNode,
-              hintText: 'Kurze Notiz zum Spot…',
+              hintText: 'Kurze Beschreibung zum Spot…',
               maxLines: 5,
               keyboardType: TextInputType.multiline,
               onChanged: (value) {
@@ -1209,7 +1346,9 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
                     if (!mounted) return;
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
-                        content: Text('Notiz konnte nicht gespeichert werden'),
+                        content: Text(
+                          'Beschreibung konnte nicht gespeichert werden',
+                        ),
                         duration: Duration(seconds: 2),
                       ),
                     );

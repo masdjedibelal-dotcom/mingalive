@@ -1,7 +1,6 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import '../theme/app_theme_extensions.dart';
-import '../widgets/glass/glass_button.dart';
 
 class CollabCarousel extends StatelessWidget {
   final String title;
@@ -37,10 +36,21 @@ class CollabCarousel extends StatelessWidget {
                 ),
               ),
             ),
-            GlassButton(
-              variant: GlassButtonVariant.ghost,
-              onPressed: onSeeAll,
-              label: 'Alle ansehen',
+            InkWell(
+              onTap: onSeeAll,
+              borderRadius: BorderRadius.circular(tokens.radius.sm),
+              splashColor: Colors.transparent,
+              highlightColor: Colors.transparent,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Text(
+                  'Alle ansehen',
+                  style: tokens.type.body.copyWith(
+                    color: tokens.colors.textSecondary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
             ),
           ],
         ),

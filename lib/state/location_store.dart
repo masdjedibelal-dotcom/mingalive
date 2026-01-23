@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/app_location.dart';
 import '../services/location_service.dart';
+import '../utils/geo.dart';
 
 class LocationStore extends ChangeNotifier {
   LocationStore({LocationService? service})
@@ -15,12 +16,16 @@ class LocationStore extends ChangeNotifier {
   static const _keyLng = 'location_lng';
   static const _keyManual = 'location_manual';
 
+  static const double _centerLat = 48.137154;
+  static const double _centerLng = 11.576124;
+  static const double _maxDistanceKm = 30;
+
   AppLocation get currentLocation {
     return _currentLocation ??
         const AppLocation(
           label: 'München Zentrum',
-          lat: 48.137154,
-          lng: 11.576124,
+          lat: _centerLat,
+          lng: _centerLng,
           source: AppLocationSource.fallback,
         );
   }
@@ -28,8 +33,8 @@ class LocationStore extends ChangeNotifier {
   Future<void> init() async {
     _currentLocation = const AppLocation(
       label: 'München Zentrum',
-      lat: 48.137154,
-      lng: 11.576124,
+      lat: _centerLat,
+      lng: _centerLng,
       source: AppLocationSource.fallback,
     );
     notifyListeners();
@@ -47,8 +52,18 @@ class LocationStore extends ChangeNotifier {
 
   void setManualLocation(AppLocation location) {
     _manualOverride = true;
-    _currentLocation = location;
-    _persistManualLocation(location);
+    if (_isWithinServiceArea(location.lat, location.lng)) {
+      _currentLocation = location;
+      _persistManualLocation(location);
+    } else {
+      _currentLocation = const AppLocation(
+        label: 'München Zentrum',
+        lat: _centerLat,
+        lng: _centerLng,
+        source: AppLocationSource.fallback,
+      );
+      _clearPersistedLocation();
+    }
     notifyListeners();
   }
 
@@ -56,13 +71,14 @@ class LocationStore extends ChangeNotifier {
     _manualOverride = false;
     await _clearPersistedLocation();
     final gpsLocation = await _service.getCurrentLocation();
-    if (gpsLocation != null) {
+    if (gpsLocation != null &&
+        _isWithinServiceArea(gpsLocation.lat, gpsLocation.lng)) {
       _currentLocation = gpsLocation;
     } else {
       _currentLocation = const AppLocation(
         label: 'München Zentrum',
-        lat: 48.137154,
-        lng: 11.576124,
+        lat: _centerLat,
+        lng: _centerLng,
         source: AppLocationSource.fallback,
       );
     }
@@ -107,6 +123,11 @@ class LocationStore extends ChangeNotifier {
       await prefs.remove(_keyLat);
       await prefs.remove(_keyLng);
     } catch (_) {}
+  }
+
+  bool _isWithinServiceArea(double lat, double lng) {
+    final distance = haversineDistanceKm(lat, lng, _centerLat, _centerLng);
+    return distance <= _maxDistanceKm;
   }
 }
 

@@ -37,6 +37,9 @@ class _ChatMessageTileState extends State<ChatMessageTile> {
       SupabaseProfileRepository();
   String? _resolvedName;
   String? _resolvedAvatar;
+  final GlobalKey _bubbleKey = GlobalKey();
+  OverlayEntry? _reactionEntry;
+  bool _isReactionOpen = false;
 
   @override
   void initState() {
@@ -56,6 +59,13 @@ class _ChatMessageTileState extends State<ChatMessageTile> {
         _resolveProfile();
       }
     }
+  }
+
+  @override
+  void dispose() {
+    _reactionEntry?.remove();
+    _reactionEntry = null;
+    super.dispose();
   }
 
   Future<void> _resolveProfile() async {
@@ -156,75 +166,83 @@ class _ChatMessageTileState extends State<ChatMessageTile> {
                   : CrossAxisAlignment.start,
               children: [
                 GestureDetector(
-                  onLongPressStart: widget.onReact == null
-                      ? null
-                      : (details) => _showReactionPickerAt(
-                            context,
-                            details.globalPosition,
-                          ),
+                  onTap: widget.onReact == null ? null : _showReactionPicker,
                   child: Stack(
                     clipBehavior: Clip.none,
                     children: [
-                      GlassSurface(
-                        radius: tokens.radius.md,
-                        blur: tokens.blur.med,
-                        scrim: widget.message.isMine
-                            ? tokens.colors.accent.withOpacity(0.22)
-                            : tokens.colors.bg.withOpacity(0.75),
-                        borderColor: tokens.colors.transparent,
-                        child: Padding(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: tokens.space.s12,
-                            vertical: tokens.space.s8,
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              // Username with badge
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  GestureDetector(
-                                    onTap: () => _openProfile(
-                                      context,
-                                      widget.message.userId,
-                                    ),
-                                    child: Text(
-                                      _displayName,
-                                      style: tokens.type.caption.copyWith(
-                                        color: widget.message.isMine
-                                            ? tokens.colors.accent
-                                            : tokens.colors.textSecondary,
-                                        fontWeight: FontWeight.w600,
-                                        decoration: widget.message.isMine
-                                            ? null
-                                            : TextDecoration.underline,
-                                        decorationColor:
-                                            tokens.colors.textSecondary,
+                      AnimatedContainer(
+                        duration: tokens.motion.med,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(tokens.radius.md),
+                          boxShadow: _isReactionOpen
+                              ? [
+                                  BoxShadow(
+                                    color: tokens.colors.accent.withOpacity(0.25),
+                                    blurRadius: 16,
+                                    offset: const Offset(0, 6),
+                                  ),
+                                ]
+                              : const [],
+                        ),
+                        child: GlassSurface(
+                          key: _bubbleKey,
+                          radius: tokens.radius.md,
+                          blur: tokens.blur.med,
+                          scrim: widget.message.isMine
+                              ? tokens.colors.accent.withOpacity(0.18)
+                              : tokens.colors.bg.withOpacity(0.65),
+                          borderColor: tokens.colors.transparent,
+                          child: Padding(
+                            padding: EdgeInsets.symmetric(
+                              horizontal: tokens.space.s12,
+                              vertical: tokens.space.s8,
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // Username with badge
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    GestureDetector(
+                                      onTap: () => _openProfile(
+                                        context,
+                                        widget.message.userId,
+                                      ),
+                                      child: Text(
+                                        _displayName,
+                                        style: tokens.type.caption.copyWith(
+                                          color: widget.message.isMine
+                                              ? tokens.colors.accent
+                                              : tokens.colors.textSecondary,
+                                          fontWeight: FontWeight.w600,
+                                        ),
                                       ),
                                     ),
-                                  ),
-                                  if (widget.userPresences != null) ...[
-                                    SizedBox(width: tokens.space.s6),
-                                    _buildPresenceBadge(
-                                      widget.message.userId,
-                                      widget.userPresences!,
-                                    ),
+                                    if (widget.userPresences != null) ...[
+                                      SizedBox(width: tokens.space.s6),
+                                      _buildPresenceBadge(
+                                        widget.message.userId,
+                                        widget.userPresences!,
+                                      ),
+                                    ],
                                   ],
-                                ],
-                              ),
-                              if (widget.message.text.isNotEmpty) ...[
-                                SizedBox(height: tokens.space.s4),
-                                // Text
-                                Text(
-                                  widget.message.text,
-                                  style: tokens.type.body.copyWith(
-                                    color: tokens.colors.textPrimary,
-                                    height: 1.4,
-                                  ),
                                 ),
+                                if (widget.message.text.isNotEmpty) ...[
+                                  SizedBox(height: tokens.space.s4),
+                                  // Text
+                                  Text(
+                                    widget.message.text,
+                                    style: tokens.type.body.copyWith(
+                                      color: widget.message.isMine
+                                          ? tokens.colors.textPrimary
+                                          : tokens.colors.textSecondary,
+                                      height: 1.4,
+                                    ),
+                                  ),
+                                ],
                               ],
-                            ],
+                            ),
                           ),
                         ),
                       ),
@@ -263,14 +281,14 @@ class _ChatMessageTileState extends State<ChatMessageTile> {
       spacing: tokens.space.s6,
       runSpacing: tokens.space.s6,
       children: entries.map((entry) {
-        return GlassSurface(
-          radius: tokens.radius.pill,
-          blur: tokens.blur.low,
-          scrim: tokens.card.glassOverlay,
-          borderColor: tokens.colors.border,
+        return Container(
           padding: EdgeInsets.symmetric(
             horizontal: tokens.space.s8,
             vertical: tokens.space.s4,
+          ),
+          decoration: BoxDecoration(
+            color: tokens.colors.bg.withOpacity(0.6),
+            borderRadius: BorderRadius.circular(tokens.radius.pill),
           ),
           child: Text(
             '${entry.key} ${entry.value}',
@@ -284,32 +302,108 @@ class _ChatMessageTileState extends State<ChatMessageTile> {
     );
   }
 
-  void _showReactionPickerAt(BuildContext context, Offset position) {
+  void _showReactionPicker() {
     if (widget.onReact == null) return;
-    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
-    showMenu<String>(
-      context: context,
-      position: RelativeRect.fromRect(
-        Rect.fromPoints(position, position),
-        Offset.zero & overlay.size,
-      ),
-      items: widget.availableReactions
-          .map(
-            (reaction) => PopupMenuItem<String>(
-              value: reaction,
-              child: Text(
-                reaction,
-                style: context.tokens.type.body.copyWith(fontSize: 18),
+    if (_reactionEntry != null) return;
+    final bubbleContext = _bubbleKey.currentContext;
+    if (bubbleContext == null) return;
+    final bubbleBox = bubbleContext.findRenderObject() as RenderBox?;
+    final overlayBox = Overlay.of(context).context.findRenderObject() as RenderBox?;
+    if (bubbleBox == null || overlayBox == null) return;
+
+    final bubbleOffset = bubbleBox.localToGlobal(Offset.zero, ancestor: overlayBox);
+    final bubbleSize = bubbleBox.size;
+    final overlaySize = overlayBox.size;
+    final reactions = widget.availableReactions;
+    final itemSize = 34.0;
+    final horizontalPadding = 12.0;
+    final barWidth = (reactions.length * itemSize) + (horizontalPadding * 2);
+    final barHeight = 42.0;
+    double left = widget.message.isMine
+        ? bubbleOffset.dx + bubbleSize.width - barWidth
+        : bubbleOffset.dx;
+    left = left.clamp(8.0, overlaySize.width - barWidth - 8.0);
+    double top = bubbleOffset.dy - barHeight - 8.0;
+    if (top < 8.0) {
+      top = bubbleOffset.dy + bubbleSize.height + 8.0;
+    }
+
+    setState(() {
+      _isReactionOpen = true;
+    });
+
+    _reactionEntry = OverlayEntry(
+      builder: (context) {
+        return Stack(
+          children: [
+            Positioned.fill(
+              child: GestureDetector(
+                onTap: _hideReactionPicker,
+                behavior: HitTestBehavior.translucent,
+                child: const SizedBox.expand(),
               ),
             ),
-          )
-          .toList(),
-    ).then((selected) {
-      if (selected != null) {
-        HapticFeedback.selectionClick();
-        widget.onReact?.call(selected);
-      }
-    });
+            Positioned(
+              left: left,
+              top: top,
+              child: Material(
+                color: Colors.transparent,
+                child: Container(
+                  height: barHeight,
+                  padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
+                  decoration: BoxDecoration(
+                    color: context.tokens.colors.bg.withOpacity(0.9),
+                    borderRadius: BorderRadius.circular(999),
+                    boxShadow: [
+                      BoxShadow(
+                        color: context.tokens.colors.textPrimary.withOpacity(0.2),
+                        blurRadius: 12,
+                        offset: const Offset(0, 6),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: reactions.map((reaction) {
+                      return GestureDetector(
+                        onTap: () {
+                          HapticFeedback.selectionClick();
+                          widget.onReact?.call(reaction);
+                          _hideReactionPicker();
+                        },
+                        child: SizedBox(
+                          width: itemSize,
+                          height: itemSize,
+                          child: Center(
+                            child: Text(
+                              reaction,
+                              style: context.tokens.type.body.copyWith(
+                                fontSize: 18,
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+    Overlay.of(context).insert(_reactionEntry!);
+  }
+
+  void _hideReactionPicker() {
+    _reactionEntry?.remove();
+    _reactionEntry = null;
+    if (mounted) {
+      setState(() {
+        _isReactionOpen = false;
+      });
+    }
   }
 
   Widget _buildAvatar() {

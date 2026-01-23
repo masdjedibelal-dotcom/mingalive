@@ -16,7 +16,7 @@ class PlaceSuggestion {
 
 class PlacesAutocompleteService {
   static const String _baseUrl = 'https://maps.googleapis.com/maps/api/place';
-  final String _apiKey = const String.fromEnvironment('GOOGLE_PLACES_KEY');
+  final String _apiKey = const String.fromEnvironment('AIzaSyAFKjeD3q01MzDBWdubuhtFRhi3u4QbCfs');
 
   String newSessionToken() => _randomToken(16);
 

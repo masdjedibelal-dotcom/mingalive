@@ -4,12 +4,9 @@ import 'theme.dart';
 import '../data/place_repository.dart';
 import '../models/place.dart';
 import 'detail_screen.dart';
-import '../widgets/activity_badge.dart';
 import '../widgets/place_image.dart';
 import '../widgets/place_distance_text.dart';
 import '../theme/app_theme_extensions.dart';
-import '../widgets/glass/glass_card.dart' as glass;
-import '../widgets/glass/glass_chip.dart';
 
 /// Screen showing places filtered by category or search term
 class ListScreen extends StatefulWidget {
@@ -38,6 +35,9 @@ class _ListScreenState extends State<ListScreen> {
   // Cached futures - created once in initState
   Future<List<Place>>? _placesFuture;
   bool _isDistanceSorting = false;
+  List<String> _categories = [];
+  bool _isLoadingCategories = false;
+  String? _activeCategory;
   bool get _isEventCategory =>
       (widget.categoryName ?? '').trim().toUpperCase() == 'EVENTS';
 
@@ -51,9 +51,10 @@ class _ListScreenState extends State<ListScreen> {
     List<Place> places;
     final activeKind =
         widget.kind.trim().isEmpty ? 'all' : widget.kind.trim();
-    if (widget.categoryName != null) {
+    final category = _activeCategory ?? widget.categoryName;
+    if (category != null) {
       places = await _repository.fetchByCategory(
-        category: widget.categoryName!,
+        category: category,
         kind: activeKind == 'all' ? '' : activeKind,
       );
     } else if (widget.searchTerm != null) {
@@ -106,8 +107,10 @@ class _ListScreenState extends State<ListScreen> {
   @override
   void initState() {
     super.initState();
+    _activeCategory = widget.categoryName;
     // Phase 1: Load places (cached future, called exactly once)
     _placesFuture = _loadPlaces();
+    _loadCategories();
     
     _placesFuture!.then((places) {
       if (!mounted || places.isEmpty) {
@@ -123,18 +126,57 @@ class _ListScreenState extends State<ListScreen> {
     if (oldWidget.categoryName != widget.categoryName ||
         oldWidget.searchTerm != widget.searchTerm ||
         oldWidget.kind != widget.kind) {
+      _activeCategory = widget.categoryName;
       // Reset state
       // Create new futures
       setState(() {
         _isDistanceSorting = true;
       });
       _placesFuture = _loadPlaces();
+      _loadCategories();
       _placesFuture!.then((places) {
         if (!mounted || places.isEmpty) {
           return;
         }
       });
     }
+  }
+
+  Future<void> _loadCategories() async {
+    if (widget.categoryName == null) return;
+    setState(() {
+      _isLoadingCategories = true;
+    });
+    try {
+      final activeKind =
+          widget.kind.trim().isEmpty ? 'all' : widget.kind.trim();
+      final categories = await _repository.fetchTopCategories(
+        kind: activeKind == 'all' ? '' : activeKind,
+        limit: 1000,
+      );
+      final sorted = List<String>.from(categories)
+        ..sort((a, b) => a.compareTo(b));
+      if (!mounted) return;
+      setState(() {
+        _categories = sorted;
+        _isLoadingCategories = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _categories = [];
+        _isLoadingCategories = false;
+      });
+    }
+  }
+
+  void _onCategoryTap(String category) {
+    if (_activeCategory == category) return;
+    setState(() {
+      _activeCategory = category;
+      _isDistanceSorting = true;
+    });
+    _placesFuture = _loadPlaces();
   }
 
   @override
@@ -149,7 +191,7 @@ class _ListScreenState extends State<ListScreen> {
           onPressed: () => Navigator.of(context).pop(),
         ),
         title: Text(
-          widget.categoryName ?? 'Ergebnisse',
+          _activeCategory ?? widget.categoryName ?? 'Ergebnisse',
           style: MingaTheme.titleMedium,
         ),
       ),
@@ -164,6 +206,51 @@ class _ListScreenState extends State<ListScreen> {
                 'Für: ${widget.searchTerm}',
                 style: MingaTheme.textMuted.copyWith(fontSize: 14),
               ),
+            ),
+          if (widget.categoryName != null)
+            SizedBox(
+              height: 40,
+              child: _isLoadingCategories
+                  ? const SizedBox.shrink()
+                  : ListView.separated(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      scrollDirection: Axis.horizontal,
+                      itemCount: _categories.length,
+                      separatorBuilder: (_, __) => const SizedBox(width: 18),
+                      itemBuilder: (context, index) {
+                        final category = _categories[index];
+                        final isSelected = category == _activeCategory;
+                        return GestureDetector(
+                          onTap: () => _onCategoryTap(category),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              Text(
+                                category,
+                                style: MingaTheme.body.copyWith(
+                                  color: isSelected
+                                      ? MingaTheme.textPrimary
+                                      : MingaTheme.textSubtle,
+                                  fontWeight:
+                                      isSelected ? FontWeight.w600 : FontWeight.w500,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Container(
+                                height: 2,
+                                width: isSelected ? 24 : 0,
+                                decoration: BoxDecoration(
+                                  color: isSelected
+                                      ? MingaTheme.accentGreen
+                                      : Colors.transparent,
+                                  borderRadius: BorderRadius.circular(2),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
             ),
           // Places list with FutureBuilder
           Expanded(
@@ -234,14 +321,20 @@ class _ListScreenState extends State<ListScreen> {
                             )
                           : SizedBox.shrink(),
                     ),
-                    // Places list - render immediately from snapshot.data
                     Expanded(
-                      child: ListView.builder(
-                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                      child: ListView.separated(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: 12,
+                        ),
                         itemCount: places.length,
+                        separatorBuilder: (_, __) => Divider(
+                          color: MingaTheme.borderSubtle,
+                          height: 24,
+                        ),
                         itemBuilder: (context, index) {
                           final place = places[index];
-                          return _buildResultCard(context: context, place: place);
+                          return _buildResultRow(context: context, place: place);
                         },
                       ),
                     ),
@@ -256,214 +349,137 @@ class _ListScreenState extends State<ListScreen> {
   }
 
   Widget _buildSkeletonList() {
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-      itemCount: 5,
+    return ListView.separated(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      itemCount: 6,
+      separatorBuilder: (_, __) => Divider(
+        color: MingaTheme.borderSubtle,
+        height: 24,
+      ),
       itemBuilder: (context, index) {
-        return _buildSkeletonCard();
+        return _buildSkeletonRow();
       },
     );
   }
 
-  Widget _buildSkeletonCard() {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: GlassSurface(
-        radius: 20,
-        blurSigma: 18,
-        overlayColor: MingaTheme.glassOverlayXSoft,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
+  Widget _buildSkeletonRow() {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 76,
+          height: 76,
+          decoration: BoxDecoration(
+            color: MingaTheme.skeletonFill,
+            borderRadius: BorderRadius.circular(MingaTheme.radiusSm),
+          ),
+        ),
+        SizedBox(width: 14),
+        Expanded(
+          child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Skeleton Bild
               Container(
-                width: 80,
-                height: 80,
+                height: 18,
+                width: double.infinity,
                 decoration: BoxDecoration(
                   color: MingaTheme.skeletonFill,
                   borderRadius: BorderRadius.circular(MingaTheme.radiusSm),
                 ),
               ),
-              SizedBox(width: 16),
-              // Skeleton Text
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Container(
-                      height: 20,
-                      width: double.infinity,
-                      decoration: BoxDecoration(
-                      color: MingaTheme.skeletonFill,
-                      borderRadius: BorderRadius.circular(MingaTheme.radiusSm),
-                      ),
-                    ),
-                    SizedBox(height: 12),
-                    Container(
-                      height: 16,
-                      width: 120,
-                      decoration: BoxDecoration(
-                      color: MingaTheme.skeletonFill,
-                      borderRadius: BorderRadius.circular(MingaTheme.radiusSm),
-                      ),
-                    ),
-                  ],
+              SizedBox(height: 10),
+              Container(
+                height: 14,
+                width: 120,
+                decoration: BoxDecoration(
+                  color: MingaTheme.skeletonFill,
+                  borderRadius: BorderRadius.circular(MingaTheme.radiusSm),
+                ),
+              ),
+              SizedBox(height: 8),
+              Container(
+                height: 12,
+                width: 160,
+                decoration: BoxDecoration(
+                  color: MingaTheme.skeletonFill,
+                  borderRadius: BorderRadius.circular(MingaTheme.radiusSm),
                 ),
               ),
             ],
           ),
         ),
-      ),
+      ],
     );
   }
 
-  Widget _buildResultCard({
+  Widget _buildResultRow({
     required BuildContext context,
     required Place place,
   }) {
-    final isEvent = _isEventPlace(place);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: glass.GlassCard(
-        variant: glass.GlassCardVariant.glass,
-        glow: isEvent,
-        padding: const EdgeInsets.all(16),
-        child: Material(
-          color: MingaTheme.transparent,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(MingaTheme.cardRadius),
-            onTap: () {
-              final placeId = place.id;
-              debugPrint('📄 List tap -> placeId=$placeId (pushing detail)');
-              // Navigate to DetailScreen
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (context) => DetailScreen(
-                    place: place,
-                    placeId: placeId,
-                    openPlaceChat: widget.openPlaceChat,
-                  ),
-                ),
-              );
-            },
-            child: Padding(
-              padding: const EdgeInsets.all(16),
+    final detailRoute = MaterialPageRoute(
+      builder: (context) => DetailScreen(
+        place: place,
+        placeId: place.id,
+        openPlaceChat: widget.openPlaceChat,
+      ),
+    );
+    return Material(
+      color: MingaTheme.transparent,
+      child: InkWell(
+        onTap: () => Navigator.of(context).push(detailRoute),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            PlaceImage(
+              imageUrl: place.imageUrl,
+              width: 76,
+              height: 76,
+              fit: BoxFit.cover,
+              borderRadius: context.radius.sm,
+            ),
+            SizedBox(width: 14),
+            Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (isEvent) ...[
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 6,
-                      children: [
-                        _buildLabelPill('Event', MingaTheme.hotOrange),
-                        _buildTimePill(place),
-                        if (place.liveCount > 0 || place.isLive)
-                          _buildLabelPill('Live', MingaTheme.accentGreen),
-                      ],
-                    ),
-                    SizedBox(height: 10),
-                  ] else ...[
-                    SizedBox(height: 2),
-                  ],
+                  Text(
+                    place.name,
+                    style: MingaTheme.titleSmall.copyWith(fontSize: 16),
+                  ),
+                  SizedBox(height: 6),
                   Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Quadratisches Bild
-                      PlaceImage(
-                        imageUrl: place.imageUrl,
-                        width: 80,
-                        height: 80,
-                        fit: BoxFit.cover,
-                        borderRadius: context.radius.sm,
-                      ),
-                      SizedBox(width: 16),
-                      // Name, Entfernung und Live-Indikator
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    place.name,
-                                    style: MingaTheme.titleSmall.copyWith(
-                                      fontSize: 16,
-                                    ),
-                                  ),
-                                ),
-                                if (place.distanceKm != null ||
-                                    _isDistanceSorting)
-                                  Row(
-                                    children: [
-                                      if (_isDistanceSorting)
-                                        SizedBox(
-                                          width: context.space.s12,
-                                          height: context.space.s12,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                            color: context.colors.textMuted,
-                                          ),
-                                        ),
-                                      if (_isDistanceSorting &&
-                                          place.distanceKm != null)
-                                        SizedBox(width: context.space.s4),
-                                      PlaceDistanceText(
-                                        distanceKm: place.distanceKm,
-                                        style: MingaTheme.textMuted.copyWith(
-                                          color: MingaTheme.textSubtle,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ActivityBadge(
-                                  label: isEvent
-                                      ? _getEventActivityLabel(place)
-                                      : _getActivityLabel(place),
-                                  color: isEvent
-                                      ? _getEventActivityColor(place)
-                                      : _getActivityColor(place),
-                                ),
-                              ],
-                            ),
-                            SizedBox(height: 8),
-                            Row(
-                              children: [
-                                // Show live count if > 0
-                                if (place.liveCount > 0) ...[
-                                  SizedBox(width: 12),
-                                  Text(
-                                    "${place.liveCount} live",
-                                    style: MingaTheme.textMuted.copyWith(
-                                      color: MingaTheme.accentGreen,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ],
-                                // Show last active time if available
-                                if (place.lastActiveAt != null &&
-                                    place.liveCount == 0) ...[
-                                  SizedBox(width: 12),
-                                  Text(
-                                    _formatLastActive(place.lastActiveAt!),
-                                    style: MingaTheme.textMuted,
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ],
+                      if (_isDistanceSorting)
+                        SizedBox(
+                          width: context.space.s12,
+                          height: context.space.s12,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: context.colors.textMuted,
+                          ),
+                        ),
+                      if (_isDistanceSorting && place.distanceKm != null)
+                        SizedBox(width: context.space.s4),
+                      PlaceDistanceText(
+                        distanceKm: place.distanceKm,
+                        style: MingaTheme.textMuted.copyWith(
+                          color: MingaTheme.textSubtle,
+                          fontSize: 12,
                         ),
                       ),
                     ],
                   ),
+                  SizedBox(height: 6),
+                  Text(
+                    _buildMetaLine(place),
+                    style: MingaTheme.textMuted.copyWith(fontSize: 12),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ],
               ),
             ),
-          ),
+          ],
         ),
       ),
     );
@@ -505,10 +521,14 @@ class _ListScreenState extends State<ListScreen> {
               SizedBox(height: 24),
               ...exampleSearches.map((search) => Padding(
                     padding: const EdgeInsets.only(bottom: 12),
-                    child: glass.GlassCard(
+                    child: Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 20,
                         vertical: 12,
+                      ),
+                      decoration: BoxDecoration(
+                        color: MingaTheme.surface,
+                        borderRadius: BorderRadius.circular(MingaTheme.radiusSm),
                       ),
                       child: Text(
                         search,
@@ -523,44 +543,26 @@ class _ListScreenState extends State<ListScreen> {
     );
   }
 
-  /// Format last active time as "aktiv vor X Min/Std/Tag"
-  String _formatLastActive(DateTime lastActiveAt) {
-    final now = DateTime.now();
-    final difference = now.difference(lastActiveAt);
-    
-    if (difference.inMinutes < 1) {
-      return 'gerade aktiv';
-    } else if (difference.inMinutes < 60) {
-      return 'aktiv vor ${difference.inMinutes} Min';
-    } else if (difference.inHours < 24) {
-      return 'aktiv vor ${difference.inHours} Std';
-    } else if (difference.inDays < 7) {
-      return 'aktiv vor ${difference.inDays} Tag${difference.inDays > 1 ? 'en' : ''}';
-    } else {
-      return 'aktiv vor ${(difference.inDays / 7).floor()} Woche${(difference.inDays / 7).floor() > 1 ? 'n' : ''}';
+  String _buildMetaLine(Place place) {
+    final parts = <String>[];
+    if (place.category.trim().isNotEmpty) {
+      parts.add(place.category);
     }
-  }
-
-  String _getActivityLabel(Place place) {
-    if (place.isLive || place.liveCount > 0) {
-      return 'Aktiv';
+    if (place.kind != null && place.kind!.trim().isNotEmpty) {
+      parts.add(place.kind!.trim());
     }
-    final lastActiveAt = place.lastActiveAt;
-    if (lastActiveAt != null && _repository.getActivityRank(place) > 0) {
-      return 'Heute aktiv';
+    if (_isEventPlace(place)) {
+      final time = _eventTimeLabel(place);
+      if (time.isNotEmpty) {
+        parts.add(time);
+      } else {
+        parts.add('Event');
+      }
     }
-    return 'Ruhig';
-  }
-
-  Color _getActivityColor(Place place) {
-    if (place.isLive || place.liveCount > 0) {
-      return MingaTheme.accentGreen;
+    if (parts.isEmpty && place.shortStatus.trim().isNotEmpty) {
+      parts.add(place.shortStatus.trim());
     }
-    final lastActiveAt = place.lastActiveAt;
-    if (lastActiveAt != null && _repository.getActivityRank(place) > 0) {
-      return MingaTheme.warningOrange;
-    }
-    return MingaTheme.textSecondary;
+    return parts.join(' • ');
   }
 
   bool _isEventPlace(Place place) {
@@ -568,35 +570,7 @@ class _ListScreenState extends State<ListScreen> {
     return category == 'EVENTS' || place.id.startsWith('event_');
   }
 
-  String _getEventActivityLabel(Place place) {
-    if (place.isLive || place.liveCount > 0) return 'Live';
-    final time = _eventTimeLabel(place);
-    return time.isNotEmpty ? time : 'Heute';
-  }
-
-  Color _getEventActivityColor(Place place) {
-    if (place.isLive || place.liveCount > 0) return MingaTheme.accentGreen;
-    final time = _eventTimeLabel(place).toLowerCase();
-    if (time.contains('morgen')) return MingaTheme.infoBlue;
-    return MingaTheme.hotOrange;
-  }
-
-  Widget _buildLabelPill(String label, Color color, {bool muted = false}) {
-    return GlassChip(
-      label: label,
-      selected: !muted,
-      onTap: null,
-    );
-  }
-
-  Widget _buildTimePill(Place place) {
-    final label = _eventTimeLabel(place);
-    if (label.isEmpty) return SizedBox.shrink();
-    final color = label.toLowerCase().contains('morgen')
-        ? MingaTheme.infoBlue
-        : MingaTheme.hotOrange;
-    return _buildLabelPill(label, color);
-  }
+  // Event chips removed; use meta line instead.
 
   String _eventTimeLabel(Place place) {
     final status = place.shortStatus.toLowerCase();

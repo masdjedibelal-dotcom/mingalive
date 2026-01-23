@@ -15,6 +15,7 @@ import '../widgets/add_to_collab_sheet.dart';
 import '../widgets/glass/glass_badge.dart';
 import '../widgets/glass/glass_button.dart';
 import '../widgets/glass/glass_surface.dart';
+import '../widgets/place_image.dart';
 import '../services/chat_repository.dart';
 import '../services/supabase_chat_repository.dart';
 import '../services/supabase_gate.dart';
@@ -513,28 +514,33 @@ class StreamScreenState extends State<StreamScreen>
   /// - Bottom: Chat input
   Widget _buildStreamItem(Place place, int index) {
     final liveCount = place.liveCount;
-    return Column(
-      children: [
-        // Stream header
-        StreamHeader(
-          placeName: place.name,
-          liveCount: liveCount,
-          distanceKm: place.distanceKm,
-          isSaved: _favoriteByPlaceId[place.id] ?? false,
-          isSaving: _favoriteLoadingByPlaceId[place.id] ?? false,
-          onToggleSave: () => _toggleFavorite(place),
-          onAddToCollab: () => _openAddToCollab(place),
-          showBackButton: _isSingleRoomMode,
-          onBack: _isSingleRoomMode ? _exitSingleRoomMode : null,
-        ),
-        Expanded(
-          child: StreamChatPane(
-            key: ValueKey('chat_${place.id}'),
-            place: place,
+    final tokens = context.tokens;
+    return Container(
+      color: tokens.colors.bg,
+      child: Column(
+        children: [
+          // Stream header
+          StreamHeader(
+            placeName: place.name,
             liveCount: liveCount,
+            distanceKm: place.distanceKm,
+            isSaved: _favoriteByPlaceId[place.id] ?? false,
+            isSaving: _favoriteLoadingByPlaceId[place.id] ?? false,
+            onToggleSave: () => _toggleFavorite(place),
+            onAddToCollab: () => _openAddToCollab(place),
+            onOpenRoomInfo: () => _openRoomInfo(place),
+            showBackButton: _isSingleRoomMode,
+            onBack: _isSingleRoomMode ? _exitSingleRoomMode : null,
           ),
-        ),
-      ],
+          Expanded(
+            child: StreamChatPane(
+              key: ValueKey('chat_${place.id}'),
+              place: place,
+              liveCount: liveCount,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -648,6 +654,19 @@ class StreamScreenState extends State<StreamScreen>
       return;
     }
     showAddToCollabSheet(context: context, place: place);
+  }
+
+  void _openRoomInfo(Place place) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ChatRoomInfoScreen(
+          place: place,
+          liveCount: place.liveCount,
+          presences: const [],
+          roster: const [],
+        ),
+      ),
+    );
   }
 
   void _handleLocationUpdate() {
@@ -845,7 +864,6 @@ class _StreamChatPaneState extends State<StreamChatPane> {
   late final dynamic _chatRepository;
   StreamSubscription<List<ChatMessage>>? _messagesSubscription;
   StreamSubscription<List<RoomMediaPost>>? _mediaSubscription;
-  StreamSubscription<int>? _presenceSubscription;
   StreamSubscription<List<PresenceProfile>>? _presenceRosterSubscription;
   final ScrollController _chatScrollController = ScrollController();
   List<ChatMessage> _messages = [];
@@ -854,8 +872,8 @@ class _StreamChatPaneState extends State<StreamChatPane> {
   bool _isReactingToMessage = false;
   final Map<String, UserPresence> _userPresences = {};
   Timer? _reactionRefreshTimer;
-  int _presenceCount = 0;
   List<PresenceProfile> _presenceRoster = [];
+  bool _isMediaCollapsed = false;
 
   @override
   void initState() {
@@ -891,14 +909,6 @@ class _StreamChatPaneState extends State<StreamChatPane> {
           _rebuildUserPresences();
         }
       });
-      _presenceSubscription =
-          supabaseRepo.watchPresenceCount(roomId).listen((count) {
-        if (mounted) {
-          setState(() {
-            _presenceCount = count;
-          });
-        }
-      });
       _presenceRosterSubscription =
           supabaseRepo.watchPresenceRoster(roomId).listen((roster) {
         if (mounted) {
@@ -931,7 +941,6 @@ class _StreamChatPaneState extends State<StreamChatPane> {
   void dispose() {
     _messagesSubscription?.cancel();
     _mediaSubscription?.cancel();
-    _presenceSubscription?.cancel();
     _presenceRosterSubscription?.cancel();
     if (SupabaseGate.isEnabled && _chatRepository is SupabaseChatRepository) {
       final roomId = widget.place.chatRoomId;
@@ -951,43 +960,58 @@ class _StreamChatPaneState extends State<StreamChatPane> {
         .where((message) => message.mediaUrl == null || message.mediaUrl!.isEmpty)
         .toList();
     final displayMessages = _buildDisplayMessages(textMessages);
+    final mediaHeight = _mediaHeightForCount(textMessages.length);
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        const mediaHeight = 260.0;
         return Column(
           children: [
-            SizedBox(
+            AnimatedContainer(
+              duration: tokens.motion.med,
+              curve: tokens.motion.curve,
               height: mediaHeight,
               width: double.infinity,
-              child: MediaCard(
-                place: widget.place,
-                mediaPosts: _mediaPosts,
-                liveCount: widget.liveCount,
-                borderRadius: BorderRadius.zero,
-                topRightActions: null,
-                useAspectRatio: false,
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: MediaCard(
+                      place: widget.place,
+                      mediaPosts: _mediaPosts,
+                      liveCount: widget.liveCount,
+                      borderRadius: BorderRadius.zero,
+                      topRightActions: null,
+                      useAspectRatio: false,
+                    ),
+                  ),
+                  Positioned(
+                    right: tokens.space.s8,
+                    top: tokens.space.s8,
+                    child: IconButton(
+                      onPressed: _toggleMediaCollapsed,
+                      icon: Icon(
+                        _isMediaCollapsed
+                            ? Icons.unfold_more
+                            : Icons.unfold_less,
+                        color: tokens.colors.textPrimary,
+                      ),
+                      splashRadius: tokens.space.s20,
+                    ),
+                  ),
+                ],
               ),
             ),
             SizedBox(height: tokens.space.s8),
             Expanded(
-              child: GlassSurface(
-                radius: tokens.radius.lg,
-                blur: tokens.blur.med,
-                scrim: tokens.card.glassOverlay,
-                borderColor: tokens.colors.border,
-                child: Column(
-                  children: [
-                    _buildChatHeader(textMessages.length),
-                    Expanded(
-                      child: _buildChatList(
-                        displayMessages,
-                        _chatScrollController,
-                      ),
+              child: Column(
+                children: [
+                  Expanded(
+                    child: _buildChatList(
+                      displayMessages,
+                      _chatScrollController,
                     ),
-                    _buildChatInput(roomId),
-                  ],
-                ),
+                  ),
+                  _buildChatInput(roomId),
+                ],
               ),
             ),
           ],
@@ -996,58 +1020,17 @@ class _StreamChatPaneState extends State<StreamChatPane> {
     );
   }
 
-  Widget _buildChatHeader(int messageCount) {
-    final tokens = context.tokens;
-    final activeCount = _userPresences.values
-        .where((presence) => presence.isToday)
-        .length;
-    final onlineCount = SupabaseGate.isEnabled
-        ? (_presenceRoster.isNotEmpty ? _presenceRoster.length : _presenceCount)
-        : widget.liveCount;
-    return Padding(
-      padding: EdgeInsets.fromLTRB(
-        tokens.space.s16,
-        tokens.space.s12,
-        tokens.space.s16,
-        tokens.space.s8,
-      ),
-      child: Row(
-        children: [
-          Text(
-            'Chat',
-            style: tokens.type.title.copyWith(
-              color: tokens.colors.textPrimary,
-            ),
-          ),
-          SizedBox(width: tokens.space.s8),
-          Text(
-            '$messageCount',
-            style: tokens.type.caption.copyWith(
-              color: tokens.colors.textMuted,
-            ),
-          ),
-          SizedBox(width: tokens.space.s12),
-          GlassBadge(
-            label: 'Online $onlineCount',
-            variant: GlassBadgeVariant.online,
-          ),
-          if (activeCount > 0) ...[
-            SizedBox(width: tokens.space.s8),
-            Text(
-              'Aktiv $activeCount',
-              style: tokens.type.caption.copyWith(
-                color: tokens.colors.textMuted,
-              ),
-            ),
-          ],
-          const Spacer(),
-          IconButton(
-            icon: Icon(Icons.group, color: tokens.colors.textPrimary),
-            onPressed: _openRoomInfo,
-          ),
-        ],
-      ),
-    );
+  double _mediaHeightForCount(int messageCount) {
+    if (_isMediaCollapsed) return 120;
+    if (messageCount >= 10) return 160;
+    if (messageCount >= 5) return 200;
+    return 260;
+  }
+
+  void _toggleMediaCollapsed() {
+    setState(() {
+      _isMediaCollapsed = !_isMediaCollapsed;
+    });
   }
 
   Widget _buildChatList(
@@ -1141,27 +1124,6 @@ class _StreamChatPaneState extends State<StreamChatPane> {
     setState(() {
       _presenceRoster = roster;
     });
-  }
-
-  void _openRoomInfo() {
-    final presences = _userPresences.values
-        .where((presence) => presence.isToday)
-        .toList()
-      ..sort((a, b) {
-        final scoreCompare = b.activityScoreToday.compareTo(a.activityScoreToday);
-        if (scoreCompare != 0) return scoreCompare;
-        return b.lastSeenAt.compareTo(a.lastSeenAt);
-      });
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => ChatRoomInfoScreen(
-          place: widget.place,
-          liveCount: SupabaseGate.isEnabled ? _presenceCount : widget.liveCount,
-          presences: presences,
-          roster: _presenceRoster,
-        ),
-      ),
-    );
   }
 
   Widget _buildChatInput(String roomId) {
@@ -1498,99 +1460,125 @@ class _StreamChatRoomScreenState extends State<StreamChatRoomScreen> {
           SizedBox(width: tokens.space.s8),
         ],
       ),
-      body: Column(
+      body: Stack(
         children: [
-          SizedBox(
-            height: 260,
-            width: double.infinity,
-            child: MediaCard(
-              place: widget.place,
-              mediaPosts: _mediaPosts,
-              liveCount: liveCount,
-              borderRadius: BorderRadius.zero,
-              topRightActions: null,
-              useAspectRatio: false,
+          Positioned.fill(
+            child: PlaceImage(
+              imageUrl: widget.place.imageUrl,
+              fit: BoxFit.cover,
             ),
           ),
-          Expanded(
-            child: GlassSurface(
-              radius: tokens.radius.sm,
-              blur: tokens.blur.med,
-              scrim: tokens.card.glassOverlay,
-              borderColor: tokens.colors.transparent,
-              child: displayMessages.isEmpty
-                    ? Center(
-                        child: Text(
-                          'Noch keine Nachrichten',
-                          style: tokens.type.caption.copyWith(
-                            color: tokens.colors.textMuted,
+          Positioned.fill(
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    tokens.colors.bg.withOpacity(0.9),
+                    tokens.colors.bg.withOpacity(0.6),
+                    tokens.colors.bg.withOpacity(0.9),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Column(
+            children: [
+              SizedBox(
+                height: 260,
+                width: double.infinity,
+                child: MediaCard(
+                  place: widget.place,
+                  mediaPosts: _mediaPosts,
+                  liveCount: liveCount,
+                  borderRadius: BorderRadius.zero,
+                  topRightActions: null,
+                  useAspectRatio: false,
+                ),
+              ),
+              Expanded(
+                child: GlassSurface(
+                  radius: tokens.radius.sm,
+                  blur: tokens.blur.med,
+                  scrim: tokens.card.glassOverlay,
+                  borderColor: tokens.colors.transparent,
+                  child: displayMessages.isEmpty
+                      ? Center(
+                          child: Text(
+                            'Noch keine Nachrichten',
+                            style: tokens.type.caption.copyWith(
+                              color: tokens.colors.textMuted,
+                            ),
                           ),
-                        ),
-                      )
-                  : ListView.builder(
-                      controller: _chatScrollController,
-                      reverse: true,
-                      physics: const BouncingScrollPhysics(),
-                      padding: EdgeInsets.symmetric(
-                        horizontal: tokens.space.s16,
-                        vertical: tokens.space.s8,
-                      ),
-                      itemCount: displayMessages.length,
-                      itemBuilder: (context, index) {
-                        final message =
-                            displayMessages[displayMessages.length - 1 - index];
-                        return AnimatedSwitcher(
-                          duration: tokens.motion.med,
-                          child: ChatMessageTile(
-                            key: ValueKey(message.id),
-                            message: message,
+                        )
+                      : ListView.builder(
+                          controller: _chatScrollController,
+                          reverse: true,
+                          physics: const BouncingScrollPhysics(),
+                          padding: EdgeInsets.symmetric(
+                            horizontal: tokens.space.s16,
+                            vertical: tokens.space.s8,
+                          ),
+                          itemCount: displayMessages.length,
+                          itemBuilder: (context, index) {
+                            final message = displayMessages[
+                                displayMessages.length - 1 - index];
+                            return AnimatedSwitcher(
+                              duration: tokens.motion.med,
+                              child: ChatMessageTile(
+                                key: ValueKey(message.id),
+                                message: message,
                                 onReact: (reaction) =>
                                     _handleMessageReaction(message, reaction),
-                          ),
-                        );
-                      },
-                    ),
-            ),
-          ),
-          SafeArea(
-            top: false,
-            child: Builder(
-              builder: (context) {
-                final currentUser = AuthService.instance.currentUser;
-                if (currentUser == null) {
-                  return ChatInput(
-                    roomId: roomId,
-                    userId: '',
-                    onSend: (_, __, ___) async {},
-                    placeholder: 'Schreib etwas…',
-                    enabled: false,
-                  );
-                }
-                return ChatInput(
-                  roomId: roomId,
-                  userId: currentUser.id,
-                  onSend: (roomId, userId, text) async {
-                    if (_chatRepository is SupabaseChatRepository) {
-                      final repo = _chatRepository as SupabaseChatRepository;
-                      await repo.sendTextMessage(roomId, userId, text);
-                    } else {
-                      final message = ChatMessage(
-                        id: 'temp_${DateTime.now().millisecondsSinceEpoch}',
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ),
+              SafeArea(
+                top: false,
+                child: Builder(
+                  builder: (context) {
+                    final currentUser = AuthService.instance.currentUser;
+                    if (currentUser == null) {
+                      return ChatInput(
                         roomId: roomId,
-                        userId: userId,
-                        userName: currentUser.name,
-                        userAvatar: currentUser.photoUrl,
-                        text: text,
-                        createdAt: DateTime.now(),
-                        isMine: true,
+                        userId: '',
+                        onSend: (_, __, ___) async {},
+                        placeholder: 'Schreib etwas…',
+                        enabled: false,
                       );
-                      _chatRepository.sendMessage(roomId, message);
                     }
+                    return ChatInput(
+                      roomId: roomId,
+                      userId: currentUser.id,
+                      onSend: (roomId, userId, text) async {
+                        if (_chatRepository is SupabaseChatRepository) {
+                          final repo =
+                              _chatRepository as SupabaseChatRepository;
+                          await repo.sendTextMessage(roomId, userId, text);
+                        } else {
+                          final message = ChatMessage(
+                            id: 'temp_${DateTime.now().millisecondsSinceEpoch}',
+                            roomId: roomId,
+                            userId: userId,
+                            userName: currentUser.name,
+                            userAvatar: currentUser.photoUrl,
+                            text: text,
+                            createdAt: DateTime.now(),
+                            isMine: true,
+                          );
+                          _chatRepository.sendMessage(roomId, message);
+                        }
+                      },
+                      placeholder: 'Schreib etwas…',
+                    );
                   },
-                  placeholder: 'Schreib etwas…',
-                );
-              },
-            ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -1789,6 +1777,7 @@ class StreamHeader extends StatelessWidget {
   final bool isSaving;
   final VoidCallback onToggleSave;
   final VoidCallback onAddToCollab;
+  final VoidCallback onOpenRoomInfo;
   final bool showBackButton;
   final VoidCallback? onBack;
 
@@ -1801,6 +1790,7 @@ class StreamHeader extends StatelessWidget {
     required this.isSaving,
     required this.onToggleSave,
     required this.onAddToCollab,
+    required this.onOpenRoomInfo,
     this.showBackButton = false,
     this.onBack,
   });
@@ -1808,95 +1798,96 @@ class StreamHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
-    return GlassSurface(
-      radius: tokens.radius.sm,
-      blur: tokens.blur.low,
-      scrim: tokens.card.glassOverlay,
-      borderColor: tokens.colors.border,
-      padding: EdgeInsets.fromLTRB(
-        tokens.space.s12,
-        tokens.space.s12,
-        tokens.space.s12,
-        tokens.space.s8,
-      ),
-      child: Row(
-        children: [
-          if (showBackButton) ...[
-            GlassButton(
-              variant: GlassButtonVariant.icon,
-              icon: Icons.arrow_back,
-              onPressed: onBack,
-            ),
-            SizedBox(width: tokens.space.s8),
-          ],
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+    return SafeArea(
+      bottom: false,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+          tokens.space.s12,
+          tokens.space.s8,
+          tokens.space.s12,
+          tokens.space.s8,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
               children: [
-                Text(
-                  placeName,
-                  style: tokens.type.title.copyWith(
-                    color: tokens.colors.textPrimary,
-                    fontWeight: FontWeight.w600,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-                SizedBox(height: tokens.space.s6),
-                Wrap(
-                  spacing: tokens.space.s8,
-                  runSpacing: tokens.space.s6,
-                  children: [
-                    GlassBadge(
-                      label: liveCount > 0 ? 'LIVE · $liveCount' : 'LIVE',
-                      variant: GlassBadgeVariant.live,
+                if (showBackButton) ...[
+                  IconButton(
+                    onPressed: onBack,
+                    icon: Icon(
+                      Icons.arrow_back,
+                      color: tokens.colors.textPrimary,
                     ),
-                    if (distanceKm != null)
-                      _buildDistancePill(context, distanceKm!),
+                    splashRadius: tokens.space.s20,
+                  ),
+                  SizedBox(width: tokens.space.s4),
+                ],
+                Expanded(
+                  child: Text(
+                    placeName,
+                    style: tokens.type.title.copyWith(
+                      color: tokens.colors.textPrimary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                Row(
+                  children: [
+                    isSaving
+                        ? SizedBox(
+                            width: tokens.space.s24,
+                            height: tokens.space.s24,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: tokens.colors.textPrimary,
+                            ),
+                          )
+                        : IconButton(
+                            icon: Icon(
+                              isSaved ? Icons.favorite : Icons.favorite_border,
+                              color: tokens.colors.textPrimary,
+                            ),
+                            onPressed: isSaving ? null : onToggleSave,
+                          ),
+                    IconButton(
+                      icon: Icon(Icons.playlist_add, color: tokens.colors.textPrimary),
+                      onPressed: onAddToCollab,
+                    ),
+                    IconButton(
+                      icon: Icon(Icons.group, color: tokens.colors.textPrimary),
+                      onPressed: onOpenRoomInfo,
+                    ),
                   ],
                 ),
               ],
             ),
-          ),
-          Row(
-            children: [
-              isSaving
-                  ? SizedBox(
-                      width: tokens.space.s24,
-                      height: tokens.space.s24,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: tokens.colors.textPrimary,
-                      ),
-                    )
-                  : IconButton(
-                      icon: Icon(
-                        isSaved ? Icons.favorite : Icons.favorite_border,
-                        color: tokens.colors.textPrimary,
-                      ),
-                      onPressed: isSaving ? null : onToggleSave,
-                    ),
-              SizedBox(width: tokens.space.s8),
-              IconButton(
-                icon: Icon(Icons.playlist_add, color: tokens.colors.textPrimary),
-                onPressed: onAddToCollab,
-              ),
-            ],
-          ),
-        ],
+            SizedBox(height: tokens.space.s6),
+            Wrap(
+              spacing: tokens.space.s8,
+              runSpacing: tokens.space.s6,
+              children: [
+                _buildOnlinePill(context, liveCount),
+                if (distanceKm != null) _buildDistancePill(context, distanceKm!),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildDistancePill(BuildContext context, double distanceKm) {
     final tokens = context.tokens;
-    return GlassSurface(
-      radius: tokens.radius.pill,
-      blur: tokens.blur.low,
-      scrim: tokens.card.glassOverlay,
-      borderColor: tokens.colors.borderStrong,
+    return Container(
       padding: EdgeInsets.symmetric(
         horizontal: tokens.space.s12,
         vertical: tokens.space.s6,
+      ),
+      decoration: BoxDecoration(
+        color: tokens.colors.bg.withOpacity(0.55),
+        borderRadius: BorderRadius.circular(tokens.radius.pill),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -1909,6 +1900,38 @@ class StreamHeader extends StatelessWidget {
           SizedBox(width: tokens.space.s6),
           Text(
             '${distanceKm.toStringAsFixed(1)} km',
+            style: tokens.type.caption.copyWith(
+              color: tokens.colors.textSecondary,
+              letterSpacing: 0.2,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOnlinePill(BuildContext context, int onlineCount) {
+    final tokens = context.tokens;
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: tokens.space.s12,
+        vertical: tokens.space.s6,
+      ),
+      decoration: BoxDecoration(
+        color: tokens.colors.bg.withOpacity(0.55),
+        borderRadius: BorderRadius.circular(tokens.radius.pill),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.circle,
+            size: tokens.space.s8,
+            color: tokens.colors.accent,
+          ),
+          SizedBox(width: tokens.space.s6),
+          Text(
+            'Online $onlineCount',
             style: tokens.type.caption.copyWith(
               color: tokens.colors.textSecondary,
               letterSpacing: 0.2,
@@ -1942,10 +1965,10 @@ class ChatRoomInfoScreen extends StatelessWidget {
       appBar: AppBar(
         backgroundColor: tokens.colors.bg,
         elevation: 0,
-        leading: GlassButton(
-          variant: GlassButtonVariant.icon,
-          icon: Icons.arrow_back,
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back, color: tokens.colors.textPrimary),
           onPressed: () => Navigator.of(context).pop(),
+          splashRadius: tokens.space.s20,
         ),
         title: Text(
           'Chatroom',

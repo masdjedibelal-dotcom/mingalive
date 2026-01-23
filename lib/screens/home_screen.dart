@@ -1,21 +1,23 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'theme.dart';
 import '../data/place_repository.dart';
 import '../models/place.dart';
-import 'detail_screen.dart';
+import '../models/chat_message.dart';
 import 'main_shell.dart';
 import 'creator_profile_screen.dart';
 import 'collabs_explore_screen.dart';
 import 'collab_detail_screen.dart';
 import '../models/collab.dart';
+import '../data/system_collabs.dart';
 import '../models/app_location.dart';
 import '../services/supabase_collabs_repository.dart';
 import '../services/supabase_profile_repository.dart';
 import '../services/supabase_gate.dart';
+import '../services/supabase_chat_repository.dart';
 import '../services/activity_service.dart';
-import '../widgets/live_badge.dart';
 import '../widgets/place_image.dart';
 import '../widgets/collab_card.dart';
 import '../widgets/collab_carousel.dart';
@@ -33,29 +35,37 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-      final PlaceRepository _repository = PlaceRepository();
-      final SupabaseCollabsRepository _collabsRepository =
-          SupabaseCollabsRepository();
-      final SupabaseProfileRepository _profileRepository =
-          SupabaseProfileRepository();
-      final LocationStore _locationStore = LocationStore();
-      Place? _trendingPlace;
-      Place? _streamPreviewPlace;
-      bool _isStreamPreviewLoading = false;
-      bool _isCollabLoading = true;
-      List<Collab> _publicCollabs = [];
-      final Map<String, int> _collabSaveCounts = {};
-      final Map<String, UserProfile> _creatorProfiles = {};
-      bool _showQuickIntro = true;
-      static const String _quickIntroKey = 'home_quick_intro_dismissed';
+  final PlaceRepository _repository = PlaceRepository();
+  final SupabaseCollabsRepository _collabsRepository =
+      SupabaseCollabsRepository();
+  final SupabaseProfileRepository _profileRepository =
+      SupabaseProfileRepository();
+  final LocationStore _locationStore = LocationStore();
+  Place? _streamPreviewPlace;
+  List<Place> _hypePlaces = [];
+  bool _isHypeLoading = false;
+  bool _isStreamPreviewLoading = false;
+  bool _isCollabLoading = true;
+  List<Collab> _publicCollabs = [];
+  final Map<String, int> _collabSaveCounts = {};
+  final Map<String, UserProfile> _creatorProfiles = {};
+  bool _showQuickIntro = true;
+  static const String _quickIntroKey = 'home_quick_intro_dismissed';
+  static const double _hypeMaxDistanceKm = 20;
+  static const int _hypeLimit = 5;
+  final SupabaseChatRepository _chatRepository = SupabaseChatRepository();
+  final Map<String, StreamSubscription<List<ChatMessage>>>
+      _hypeMessageSubscriptions = {};
+  final Map<String, List<String>> _hypeMessagesByRoom = {};
+  final Map<String, String?> _hypeMediaByRoom = {};
 
   @override
   void initState() {
     super.initState();
     _locationStore.init();
     _loadQuickIntroPreference();
-    _loadTrendingPlace();
     _loadStreamPreviewPlace();
+    _loadHypePlaces();
     _checkActivityNotifications();
     _loadDiscoveryCollabs();
     _locationStore.addListener(_handleLocationChange);
@@ -123,48 +133,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  /// Load trending place sorted by activity (liveCount, lastActiveAt)
-  /// Falls back to first place if no activity data available
-  Future<void> _loadTrendingPlace() async {
-    try {
-      final trendingPlaces = await _repository.fetchTrending(limit: 1);
-      if (mounted && trendingPlaces.isNotEmpty) {
-        setState(() {
-          _trendingPlace = trendingPlaces.first;
-        });
-        return;
-      }
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('⚠️ HomeScreen: Failed to load trending place: $e');
-      }
-    }
-    
-    // Fallback: try to get first place from all places
-    if (mounted) {
-      try {
-        final allPlaces = _repository.getAll();
-        if (allPlaces.isNotEmpty) {
-          setState(() {
-            _trendingPlace = allPlaces.first;
-          });
-          return;
-        }
-      } catch (e) {
-        if (kDebugMode) {
-          debugPrint('⚠️ HomeScreen: Failed to load all places: $e');
-        }
-      }
-      
-      // Last resort: use mock trending place
-      if (mounted) {
-        setState(() {
-          _trendingPlace = _repository.getTrendingPlace();
-        });
-      }
-    }
-  }
-
   Future<void> _loadStreamPreviewPlace() async {
     if (_isStreamPreviewLoading) return;
     setState(() {
@@ -226,8 +194,125 @@ class _HomeScreenState extends State<HomeScreen> {
     return reviewsScore - distancePenalty;
   }
 
+  Future<void> _loadHypePlaces() async {
+    if (_isHypeLoading) return;
+    setState(() {
+      _isHypeLoading = true;
+    });
+    try {
+      final places = await _repository.fetchPlacesPage(
+        offset: 0,
+        limit: 400,
+      );
+      if (!mounted) return;
+      final location = _locationStore.currentLocation;
+      final withDistances = places.map((place) {
+        if (place.lat == null || place.lng == null) {
+          return place.copyWith(clearDistanceKm: true);
+        }
+        final distanceKm =
+            haversineKm(location.lat, location.lng, place.lat!, place.lng!);
+        return place.copyWith(distanceKm: distanceKm);
+      }).toList();
+
+      final rooms = withDistances.where((place) => place.socialEnabled).toList();
+      final inRange = rooms
+          .where(
+              (place) => place.distanceKm != null && place.distanceKm! <= _hypeMaxDistanceKm)
+          .toList()
+        ..sort(_compareHypePlaces);
+
+      var selected = inRange.take(_hypeLimit).toList();
+      if (selected.isEmpty) {
+        final fallback = List<Place>.from(rooms)
+          ..sort(PlaceRepository.compareByDistanceNullable);
+        selected = fallback.take(_hypeLimit).toList();
+      }
+      setState(() {
+        _hypePlaces = selected;
+      });
+      await _attachHypeRoomMediaAndChats(selected);
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('⚠️ HomeScreen: Failed to load hype places: $e');
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isHypeLoading = false;
+        });
+      }
+    }
+  }
+
+  int _compareHypePlaces(Place a, Place b) {
+    final rankA = _repository.getActivityRank(a);
+    final rankB = _repository.getActivityRank(b);
+    if (rankA != rankB) return rankB.compareTo(rankA);
+    final liveCompare = b.liveCount.compareTo(a.liveCount);
+    if (liveCompare != 0) return liveCompare;
+    final ratingCompare = b.ratingCount.compareTo(a.ratingCount);
+    if (ratingCompare != 0) return ratingCompare;
+    return PlaceRepository.compareByDistanceNullable(a, b);
+  }
+
+  Future<void> _attachHypeRoomMediaAndChats(List<Place> places) async {
+    final roomIds = places.map((place) => place.chatRoomId).toList();
+    final activeRooms = roomIds.toSet();
+    for (final entry in _hypeMessageSubscriptions.entries.toList()) {
+      if (!activeRooms.contains(entry.key)) {
+        entry.value.cancel();
+        _hypeMessageSubscriptions.remove(entry.key);
+        _hypeMessagesByRoom.remove(entry.key);
+      }
+    }
+
+    if (!SupabaseGate.isEnabled) {
+      if (!mounted) return;
+      setState(() {
+        for (final place in places) {
+          _hypeMessagesByRoom[place.chatRoomId] = place.chatPreview;
+        }
+      });
+      return;
+    }
+
+    final mediaMap = await _chatRepository.fetchRoomLatestMedia(roomIds);
+    if (!mounted) return;
+    setState(() {
+      _hypeMediaByRoom
+        ..clear()
+        ..addAll(mediaMap);
+    });
+
+    for (final place in places) {
+      final roomId = place.chatRoomId;
+      if (_hypeMessageSubscriptions.containsKey(roomId)) continue;
+      _hypeMessageSubscriptions[roomId] = _chatRepository
+          .watchMessages(roomId, limit: 5)
+          .listen((messages) {
+        if (!mounted) return;
+        final trimmed = messages
+            .where((message) => message.text.trim().isNotEmpty)
+            .toList();
+        final latestFive = trimmed.take(5).toList();
+        final preview = latestFive
+            .reversed
+            .map((message) =>
+                '${message.userName.trim()}: ${message.text.trim()}')
+            .toList();
+        setState(() {
+          _hypeMessagesByRoom[roomId] = preview;
+        });
+      });
+    }
+  }
+
   @override
   void dispose() {
+    for (final sub in _hypeMessageSubscriptions.values) {
+      sub.cancel();
+    }
     _locationStore.removeListener(_handleLocationChange);
     _locationStore.dispose();
     super.dispose();
@@ -235,6 +320,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _handleLocationChange() {
     _loadStreamPreviewPlace();
+    _loadHypePlaces();
   }
 
   Future<void> _loadQuickIntroPreference() async {
@@ -256,15 +342,22 @@ class _HomeScreenState extends State<HomeScreen> {
 
 
   Future<void> _loadDiscoveryCollabs() async {
-    if (!SupabaseGate.isEnabled) {
-      setState(() {
-        _isCollabLoading = false;
-      });
-      return;
-    }
-
     try {
+      final systemDefs = await SystemCollabsStore.load();
+      final systemCollabs = _mapSystemCollabs(systemDefs);
+
+      if (!SupabaseGate.isEnabled) {
+        if (mounted) {
+          setState(() {
+            _publicCollabs = systemCollabs;
+            _isCollabLoading = false;
+          });
+        }
+        return;
+      }
+
       final collabs = await _collabsRepository.fetchPublicCollabs();
+      final combined = [...systemCollabs, ...collabs];
 
       final userIds = collabs.map((list) => list.ownerId).toSet();
       final profiles = await Future.wait(
@@ -284,7 +377,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (mounted) {
         setState(() {
-          _publicCollabs = collabs;
+          _publicCollabs = combined;
           _isCollabLoading = false;
         });
       }
@@ -298,6 +391,27 @@ class _HomeScreenState extends State<HomeScreen> {
         });
       }
     }
+  }
+
+  List<Collab> _mapSystemCollabs(List<CollabDefinition> defs) {
+    final now = DateTime.now();
+    return defs.asMap().entries.map((entry) {
+      final index = entry.key;
+      final def = entry.value;
+      return Collab(
+        id: def.id,
+        ownerId: 'localspots',
+        title: def.title,
+        description: def.subtitle,
+        isPublic: true,
+        coverMediaUrls: const [],
+        createdAt: now.subtract(Duration(minutes: index)),
+        creatorDisplayName: 'LocalSpots',
+        creatorUsername: 'LocalSpots',
+        creatorAvatarUrl: null,
+        creatorBadge: null,
+      );
+    }).toList();
   }
 
   List<Collab> get _popularCollabs {
@@ -411,8 +525,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Use loaded trending place or fallback to mock
-    final trendingPlace = _trendingPlace ?? _repository.getTrendingPlace();
     
     return Scaffold(
       backgroundColor: MingaTheme.background,
@@ -447,7 +559,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 SizedBox(height: 36),
                 _buildSectionTitle("Gerade angesagt"),
                 SizedBox(height: 16),
-                _buildHypeSquare(context, trendingPlace),
+                _buildHypeCarousel(context),
                 SizedBox(height: 28),
               ],
             ),
@@ -514,11 +626,14 @@ class _HomeScreenState extends State<HomeScreen> {
       builder: (context) {
         return SafeArea(
           top: false,
-          child: GlassSurface(
-            radius: 20,
-            blurSigma: 18,
-            overlayColor: MingaTheme.glassOverlay,
-            child: LocationPickerSheet(locationStore: _locationStore),
+          child: ClipRRect(
+            borderRadius: const BorderRadius.vertical(
+              top: Radius.circular(24),
+            ),
+            child: Container(
+              color: MingaTheme.surface,
+              child: LocationPickerSheet(locationStore: _locationStore),
+            ),
           ),
         );
       },
@@ -544,109 +659,130 @@ class _HomeScreenState extends State<HomeScreen> {
         }
         widget.onStreamTap?.call();
       },
-      child: GlassSurface(
-        radius: MingaTheme.cardRadius,
-        blurSigma: 20,
-        overlayColor: MingaTheme.glassOverlay,
-        boxShadow: MingaTheme.cardShadowStrong,
-        child: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                MingaTheme.accentGreenOverlay,
-                MingaTheme.glassOverlay,
-              ],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-          ),
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(MingaTheme.cardRadius),
+          boxShadow: MingaTheme.cardShadowStrong,
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(MingaTheme.cardRadius),
+          child: Stack(
             children: [
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              Positioned.fill(
+                child: PlaceImage(
+                  imageUrl: preview?.imageUrl,
+                  fit: BoxFit.cover,
+                ),
+              ),
+              Positioned.fill(
+                child: Container(
                   decoration: BoxDecoration(
-                    color: MingaTheme.accentGreenSoft,
-                    borderRadius: BorderRadius.circular(MingaTheme.chipRadius),
-                    border: Border.all(
-                      color: MingaTheme.accentGreenBorderStrong,
-                    ),
-                  ),
-                  child: Text(
-                    'NÄCHSTER RAUM',
-                    style: MingaTheme.label.copyWith(
-                      color: MingaTheme.accentGreen,
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        MingaTheme.darkOverlaySoft,
+                        MingaTheme.darkOverlayStrong,
+                      ],
                     ),
                   ),
                 ),
-                  if (_isStreamPreviewLoading) ...[
-                    SizedBox(width: 10),
-                    SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: MingaTheme.textSecondary,
-                      ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: MingaTheme.accentGreenSoft,
+                            borderRadius:
+                                BorderRadius.circular(MingaTheme.chipRadius),
+                            border: Border.all(
+                              color: MingaTheme.accentGreenBorderStrong,
+                            ),
+                          ),
+                          child: Text(
+                            'NÄCHSTER RAUM',
+                            style: MingaTheme.label.copyWith(
+                              color: MingaTheme.accentGreen,
+                            ),
+                          ),
+                        ),
+                        if (_isStreamPreviewLoading) ...[
+                          SizedBox(width: 10),
+                          SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: MingaTheme.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    SizedBox(height: 14),
+                    Text(
+                      previewName == null || previewName.isEmpty
+                          ? 'Räume in deiner Nähe'
+                          : previewName,
+                      style: MingaTheme.titleMedium,
+                    ),
+                    SizedBox(height: 6),
+                    Text(
+                      previewName == null || previewName.isEmpty
+                          ? 'Wir suchen gerade einen Live‑Room.'
+                          : 'Tippe, um beizutreten.',
+                      style: MingaTheme.bodySmall,
+                    ),
+                    SizedBox(height: 14),
+                    Row(
+                      children: [
+                        ElevatedButton(
+                          onPressed: () {
+                            if (preview != null) {
+                              MainShell.of(context)?.openPlaceChat(preview.id);
+                              return;
+                            }
+                            widget.onStreamTap?.call();
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: MingaTheme.hotOrange,
+                            foregroundColor: MingaTheme.textPrimary,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 18,
+                              vertical: 12,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius:
+                                  BorderRadius.circular(MingaTheme.radiusMd),
+                            ),
+                            elevation: 0,
+                          ),
+                          child: Text(
+                            'Stream öffnen',
+                            style: MingaTheme.bodySmall.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        SizedBox(width: 12),
+                        Text(
+                          'Tippen zum Öffnen',
+                          style: MingaTheme.textMuted,
+                        ),
+                      ],
                     ),
                   ],
-                ],
-              ),
-              SizedBox(height: 14),
-              Text(
-                previewName == null || previewName.isEmpty
-                    ? 'Räume in deiner Nähe'
-                    : previewName,
-                style: MingaTheme.titleMedium,
-              ),
-              SizedBox(height: 6),
-              Text(
-                previewName == null || previewName.isEmpty
-                    ? 'Wir suchen gerade einen Live‑Room.'
-                    : 'Tippe, um beizutreten.',
-                style: MingaTheme.bodySmall,
-              ),
-              SizedBox(height: 14),
-              Row(
-                children: [
-                  ElevatedButton(
-                    onPressed: () {
-                      if (preview != null) {
-                        MainShell.of(context)?.openPlaceChat(preview.id);
-                        return;
-                      }
-                      widget.onStreamTap?.call();
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: MingaTheme.hotOrange,
-                      foregroundColor: MingaTheme.textPrimary,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 18,
-                        vertical: 12,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(MingaTheme.radiusMd),
-                      ),
-                      elevation: 0,
-                    ),
-                  child: Text(
-                    'Stream öffnen',
-                    style: MingaTheme.bodySmall.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  ),
-                  SizedBox(width: 12),
-                  Text(
-                    'Tippen zum Öffnen',
-                    style: MingaTheme.textMuted,
-                  ),
-                ],
+                ),
               ),
             ],
           ),
@@ -707,97 +843,41 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  /// Large featured card showing trending place with live count
-  Widget _buildHypeSquare(BuildContext context, Place trendingPlace) {
-    return GestureDetector(
-      onTap: () {
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (context) => DetailScreen(
-              place: trendingPlace,
-              openChatOnLoad: true,
-              openPlaceChat: (placeId) {
-                MainShell.of(context)?.openPlaceChat(placeId);
-              },
-            ),
-          ),
-        );
-      },
-      child: AspectRatio(
-        aspectRatio: 3 / 4,
-        child: Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(MingaTheme.radiusXl),
-            boxShadow: MingaTheme.cardShadowStrong,
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(MingaTheme.radiusXl),
-            child: Stack(
-              children: [
-                // Hintergrundbild
-                Positioned.fill(
-                  child: PlaceImage(
-                    imageUrl: trendingPlace.imageUrl,
-                    fit: BoxFit.cover,
-                  ),
-                ),
-                // Dunkler Verlauf unten
-                Positioned.fill(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          MingaTheme.transparent,
-                          MingaTheme.darkOverlaySoft,
-                          MingaTheme.darkOverlayStrong,
-                        ],
-                        stops: const [0.0, 0.5, 1.0],
-                      ),
-                    ),
-                  ),
-                ),
-                // Name des Ortes oben
-                Positioned(
-                  top: 32,
-                  left: 28,
-                  right: 28,
-                  child: Text(
-                    trendingPlace.name,
-                    style: MingaTheme.displayLarge.copyWith(
-                      shadows: [
-                        Shadow(
-                          color: MingaTheme.darkOverlay,
-                          blurRadius: 8,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                // Badge unten
-                Positioned(
-                  bottom: 32,
-                  left: 28,
-                  right: 28,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      LiveBadge(
-                        liveCount: trendingPlace.liveCount,
-                        badgeColor: MingaTheme.hotOrange,
-                        showIcon: true,
-                        reverseText: true,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
+  Widget _buildHypeCarousel(BuildContext context) {
+    if (_isHypeLoading && _hypePlaces.isEmpty) {
+      return SizedBox(
+        height: 210,
+        child: Center(
+          child: CircularProgressIndicator(color: MingaTheme.accentGreen),
         ),
+      );
+    }
+    if (_hypePlaces.isEmpty) {
+      return Text(
+        'Aktuell keine aktiven Chatrooms in deiner Nähe.',
+        style: MingaTheme.bodySmall.copyWith(color: MingaTheme.textSubtle),
+      );
+    }
+    return SizedBox(
+      height: 360,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.only(right: 4),
+        itemCount: _hypePlaces.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 14),
+        itemBuilder: (context, index) {
+          final place = _hypePlaces[index];
+          final mediaUrl =
+              _hypeMediaByRoom[place.chatRoomId] ?? place.imageUrl;
+          final messages =
+              _hypeMessagesByRoom[place.chatRoomId] ?? place.chatPreview;
+          return _HypeRoomCard(
+            place: place,
+            mediaUrl: mediaUrl,
+            messages: messages,
+            onTap: () => MainShell.of(context)?.openPlaceChat(place.id),
+          );
+        },
       ),
     );
   }
@@ -837,6 +917,128 @@ class _IntroItem extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _HypeRoomCard extends StatelessWidget {
+  final Place place;
+  final String? mediaUrl;
+  final List<String> messages;
+  final VoidCallback onTap;
+
+  const _HypeRoomCard({
+    required this.place,
+    required this.mediaUrl,
+    required this.messages,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: SizedBox(
+        width: 260,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(MingaTheme.radiusLg),
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: PlaceImage(
+                  imageUrl: mediaUrl ?? place.imageUrl,
+                  fit: BoxFit.cover,
+                ),
+              ),
+              Positioned.fill(
+                child: Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        MingaTheme.transparent,
+                        MingaTheme.darkOverlaySoft,
+                        MingaTheme.darkOverlayStrong,
+                      ],
+                      stops: const [0.0, 0.45, 1.0],
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 16,
+                right: 16,
+                bottom: 16,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      place.name,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: MingaTheme.titleSmall.copyWith(
+                        color: MingaTheme.textPrimary,
+                        shadows: [
+                          Shadow(
+                            color: MingaTheme.darkOverlay,
+                            blurRadius: 8,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    _ChatPreviewList(
+                      messages: messages,
+                      fallback: place.shortStatus,
+                    ),
+                  const SizedBox(height: 4),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ChatPreviewList extends StatelessWidget {
+  final List<String> messages;
+  final String? fallback;
+
+  const _ChatPreviewList({
+    required this.messages,
+    this.fallback,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hasMessages = messages.isNotEmpty;
+    final lastMessages = hasMessages
+        ? (messages.length > 5
+            ? messages.sublist(messages.length - 5)
+            : messages)
+        : <String>[
+            (fallback?.isNotEmpty == true) ? fallback! : 'Noch keine Chats',
+          ];
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.end,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: lastMessages.map((text) {
+        return Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text(
+            text,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: MingaTheme.bodySmall.copyWith(
+              color: MingaTheme.textSecondary,
+            ),
+          ),
+        );
+      }).toList(),
     );
   }
 }

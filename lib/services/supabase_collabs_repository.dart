@@ -483,7 +483,8 @@ class SupabaseCollabsRepository {
       final response = await supabase
           .from('collab_items')
           .select('place_id')
-          .eq('collab_id', collabId);
+          .eq('collab_id', collabId)
+          .order('position', ascending: true);
 
       final rows = response as List;
       if (kDebugMode) {
@@ -515,16 +516,18 @@ class SupabaseCollabsRepository {
       final supabase = SupabaseGate.client;
       final response = await supabase
           .from('collab_items')
-          .select('place_id, note')
+          .select('place_id, description')
           .eq('collab_id', collabId);
 
       final rows = response as List;
       final Map<String, String> notes = {};
       for (final row in rows) {
         final placeId = row['place_id'] as String?;
-        final note = row['note'] as String?;
-        if (placeId != null && note != null && note.trim().isNotEmpty) {
-          notes[placeId] = note.trim();
+        final description = row['description'] as String?;
+        if (placeId != null &&
+            description != null &&
+            description.trim().isNotEmpty) {
+          notes[placeId] = description.trim();
         }
       }
       return notes;
@@ -549,7 +552,7 @@ class SupabaseCollabsRepository {
       final supabase = SupabaseGate.client;
       await supabase
           .from('collab_items')
-          .update({'note': note.trim()})
+          .update({'description': note.trim()})
           .eq('collab_id', collabId)
           .eq('place_id', placeId);
     } catch (e) {

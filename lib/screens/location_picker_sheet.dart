@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/app_location.dart';
 import '../services/places_autocomplete_service.dart';
 import '../state/location_store.dart';
+import '../utils/geo.dart';
 import 'theme.dart';
 
 class LocationPickerSheet extends StatefulWidget {
@@ -15,8 +16,13 @@ class LocationPickerSheet extends StatefulWidget {
 }
 
 class _LocationPickerSheetState extends State<LocationPickerSheet> {
+  static const double _centerLat = 48.137154;
+  static const double _centerLng = 11.576124;
+  static const double _maxDistanceKm = 30;
+
   final TextEditingController _controller = TextEditingController();
   final PlacesAutocompleteService _service = PlacesAutocompleteService();
+  final FocusNode _searchFocus = FocusNode();
   Timer? _debounce;
   bool _isLoading = false;
   bool _isResolving = false;
@@ -33,6 +39,7 @@ class _LocationPickerSheetState extends State<LocationPickerSheet> {
   void dispose() {
     _debounce?.cancel();
     _controller.dispose();
+    _searchFocus.dispose();
     super.dispose();
   }
 
@@ -74,12 +81,30 @@ class _LocationPickerSheetState extends State<LocationPickerSheet> {
     );
     if (!mounted) return;
     if (latLng != null) {
+      if (_isWithinServiceArea(latLng.lat, latLng.lng)) {
+        widget.locationStore.setManualLocation(
+          AppLocation(
+            label: suggestion.mainText,
+            lat: latLng.lat,
+            lng: latLng.lng,
+            source: AppLocationSource.manual,
+          ),
+        );
+        Navigator.of(context).pop();
+        return;
+      }
       widget.locationStore.setManualLocation(
-        AppLocation(
-          label: suggestion.mainText,
-          lat: latLng.lat,
-          lng: latLng.lng,
-          source: AppLocationSource.manual,
+        const AppLocation(
+          label: 'München Zentrum',
+          lat: _centerLat,
+          lng: _centerLng,
+          source: AppLocationSource.fallback,
+        ),
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Nur im Umkreis von 30 km um München verfügbar.'),
+          duration: Duration(seconds: 2),
         ),
       );
       Navigator.of(context).pop();
@@ -95,29 +120,61 @@ class _LocationPickerSheetState extends State<LocationPickerSheet> {
     return SafeArea(
       top: false,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
               width: 36,
               height: 4,
-              margin: const EdgeInsets.only(bottom: 16),
+              margin: const EdgeInsets.only(bottom: 14),
               decoration: BoxDecoration(
                 color: MingaTheme.borderStrong,
                 borderRadius: BorderRadius.circular(MingaTheme.radiusSm),
               ),
             ),
-            GlassSurface(
-              radius: 14,
-              blurSigma: 16,
-              overlayColor: MingaTheme.glassOverlayXSoft,
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Standort auswählen',
+                    style: MingaTheme.titleLarge.copyWith(
+                      color: MingaTheme.textPrimary,
+                    ),
+                  ),
+                ),
+                InkWell(
+                  onTap: () => Navigator.of(context).pop(),
+                  borderRadius: BorderRadius.circular(18),
+                  child: Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: MingaTheme.glassOverlayXXSoft,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.close,
+                      size: 18,
+                      color: MingaTheme.textSecondary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            SizedBox(height: 14),
+            Container(
+              decoration: BoxDecoration(
+                color: MingaTheme.glassOverlayXXSoft,
+                borderRadius: BorderRadius.circular(MingaTheme.radiusMd),
+              ),
               child: TextField(
                 controller: _controller,
+                focusNode: _searchFocus,
                 onChanged: _onChanged,
                 style: MingaTheme.body,
                 decoration: InputDecoration(
-                  hintText: 'Ort oder Stadtteil suchen',
+                  hintText: 'Ort, Stadtteil oder Straße suchen',
                   hintStyle: MingaTheme.bodySmall.copyWith(
                     color: MingaTheme.textSubtle,
                   ),
@@ -133,35 +190,33 @@ class _LocationPickerSheetState extends State<LocationPickerSheet> {
                     borderRadius: BorderRadius.circular(MingaTheme.radiusMd),
                     borderSide: BorderSide.none,
                   ),
-                ),
-              ),
-            ),
-            SizedBox(height: 8),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                onPressed: _isResolving
-                    ? null
-                    : () async {
-                        await widget.locationStore.useMyLocation();
-                        if (mounted) {
-                          Navigator.of(context).pop();
-                        }
-                      },
-                icon: Icon(
-                  Icons.my_location,
-                  color: MingaTheme.accentGreen,
-                  size: 18,
-                ),
-                label: Text(
-                  'Use my location',
-                  style: MingaTheme.body.copyWith(
-                    color: MingaTheme.accentGreen,
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(MingaTheme.radiusMd),
+                    borderSide: BorderSide.none,
                   ),
                 ),
               ),
             ),
-            SizedBox(height: 12),
+            SizedBox(height: 14),
+            _buildActionRow(
+              icon: Icons.my_location,
+              label: 'Aktuellen Standort verwenden',
+              accent: true,
+              onTap: _isResolving
+                  ? null
+                  : () async {
+                      await widget.locationStore.useMyLocation();
+                      if (mounted) {
+                        Navigator.of(context).pop();
+                      }
+                    },
+              trailing: Icon(
+                Icons.check,
+                size: 16,
+                color: MingaTheme.accentGreen,
+              ),
+            ),
+            SizedBox(height: 8),
             if (_isLoading)
               Padding(
                 padding: EdgeInsets.symmetric(vertical: 12),
@@ -172,9 +227,9 @@ class _LocationPickerSheetState extends State<LocationPickerSheet> {
             else if (_suggestions.isEmpty)
               Text(
                 'Keine Vorschläge',
-              style: MingaTheme.bodySmall.copyWith(
-                color: MingaTheme.textSubtle,
-              ),
+                style: MingaTheme.bodySmall.copyWith(
+                  color: MingaTheme.textSubtle,
+                ),
               )
             else
               ListView.separated(
@@ -185,21 +240,38 @@ class _LocationPickerSheetState extends State<LocationPickerSheet> {
                 itemBuilder: (context, index) {
                   final suggestion = _suggestions[index];
                   return ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                    dense: true,
+                    visualDensity: VisualDensity.compact,
                     onTap: _isResolving
                         ? null
                         : () => _selectSuggestion(suggestion),
-                    title: Text(
-                      suggestion.mainText,
-                      style: MingaTheme.body,
+                    leading: Icon(
+                      Icons.place_outlined,
+                      size: 18,
+                      color: MingaTheme.textSubtle,
                     ),
-                    subtitle: suggestion.secondaryText.isNotEmpty
-                        ? Text(
-                            suggestion.secondaryText,
-                            style: MingaTheme.bodySmall.copyWith(
-                              color: MingaTheme.textSubtle,
+                    title: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          suggestion.mainText,
+                          style: MingaTheme.body.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        if (suggestion.secondaryText.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: Text(
+                              suggestion.secondaryText,
+                              style: MingaTheme.bodySmall.copyWith(
+                                color: MingaTheme.textSubtle,
+                              ),
                             ),
-                          )
-                        : null,
+                          ),
+                      ],
+                    ),
                     trailing: _isResolving
                         ? SizedBox(
                             width: 16,
@@ -217,6 +289,53 @@ class _LocationPickerSheetState extends State<LocationPickerSheet> {
         ),
       ),
     );
+  }
+
+  Widget _buildActionRow({
+    required IconData icon,
+    required String label,
+    required VoidCallback? onTap,
+    bool accent = false,
+    Widget? trailing,
+  }) {
+    final iconColor = accent ? MingaTheme.accentGreen : MingaTheme.textSecondary;
+    final textColor = accent ? MingaTheme.accentGreen : MingaTheme.textPrimary;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(MingaTheme.radiusSm),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: MingaTheme.glassOverlayXXSoft,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: iconColor, size: 18),
+            ),
+            SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                label,
+                style: MingaTheme.body.copyWith(
+                  color: textColor,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            if (trailing != null) trailing,
+          ],
+        ),
+      ),
+    );
+  }
+
+  bool _isWithinServiceArea(double lat, double lng) {
+    final distance = haversineDistanceKm(lat, lng, _centerLat, _centerLng);
+    return distance <= _maxDistanceKm;
   }
 }
 

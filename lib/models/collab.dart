@@ -51,6 +51,10 @@ class CollabDefinition {
   final String? gradientKey;
   final CollabQuery query;
   final int limit;
+  final List<String> spotPoolIds;
+  final bool requiresRuntime;
+  final List<String> runtimeFilters;
+  final List<String> ranking;
 
   const CollabDefinition({
     required this.id,
@@ -64,6 +68,10 @@ class CollabDefinition {
     this.gradientKey,
     required this.query,
     this.limit = 30,
+    this.spotPoolIds = const [],
+    this.requiresRuntime = false,
+    this.runtimeFilters = const [],
+    this.ranking = const [],
   });
 }
 

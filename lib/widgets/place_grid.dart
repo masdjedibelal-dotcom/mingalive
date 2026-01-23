@@ -8,12 +8,16 @@ class PlaceGrid extends StatelessWidget {
   final List<Place> places;
   final String emptyText;
   final ValueChanged<Place>? onPlaceTap;
+  final bool shrinkWrap;
+  final ScrollPhysics? physics;
 
   const PlaceGrid({
     super.key,
     required this.places,
     required this.emptyText,
     this.onPlaceTap,
+    this.shrinkWrap = false,
+    this.physics,
   });
 
   @override
@@ -40,7 +44,11 @@ class PlaceGrid extends StatelessWidget {
         horizontal: tokens.space.s4,
         vertical: tokens.space.s8,
       ),
-      physics: const BouncingScrollPhysics(),
+      shrinkWrap: shrinkWrap,
+      physics: physics ??
+          (shrinkWrap
+              ? const NeverScrollableScrollPhysics()
+              : const BouncingScrollPhysics()),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
         crossAxisSpacing: 12,

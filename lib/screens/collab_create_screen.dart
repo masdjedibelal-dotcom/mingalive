@@ -2,8 +2,11 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'theme.dart';
+import '../data/place_repository.dart';
+import '../models/place.dart';
 import '../services/supabase_collabs_repository.dart';
 import '../services/auth_service.dart';
+import '../widgets/place_image.dart';
 
 class CollabCreateScreen extends StatefulWidget {
   const CollabCreateScreen({super.key});
@@ -15,20 +18,20 @@ class CollabCreateScreen extends StatefulWidget {
 class _CollabCreateScreenState extends State<CollabCreateScreen> {
   final SupabaseCollabsRepository _collabsRepository =
       SupabaseCollabsRepository();
+  final PlaceRepository _placeRepository = PlaceRepository();
   final ImagePicker _imagePicker = ImagePicker();
   final TextEditingController _titleController = TextEditingController();
   final TextEditingController _descriptionController = TextEditingController();
-  final TextEditingController _itemsController = TextEditingController();
   bool _isPublic = false;
   bool _isSaving = false;
   final List<_PendingMedia> _pendingMedia = [];
   bool _isUploadingMedia = false;
+  List<Place> _selectedPlaces = [];
 
   @override
   void dispose() {
     _titleController.dispose();
     _descriptionController.dispose();
-    _itemsController.dispose();
     super.dispose();
   }
 
@@ -48,11 +51,7 @@ class _CollabCreateScreenState extends State<CollabCreateScreen> {
       _isSaving = true;
     });
 
-    final placeIds = _itemsController.text
-        .split(',')
-        .map((value) => value.trim())
-        .where((value) => value.isNotEmpty)
-        .toList();
+    final placeIds = _selectedPlaces.map((place) => place.id).toList();
 
     final collab = await _collabsRepository.createCollab(
       title: title,
@@ -159,6 +158,7 @@ class _CollabCreateScreenState extends State<CollabCreateScreen> {
             radius: 16,
             blurSigma: 16,
             overlayColor: MingaTheme.glassOverlayXSoft,
+            borderColor: MingaTheme.transparent,
             child: TextField(
               controller: _descriptionController,
               style: MingaTheme.body,
@@ -206,29 +206,7 @@ class _CollabCreateScreenState extends State<CollabCreateScreen> {
           SizedBox(height: 12),
           _buildMediaSection(),
           SizedBox(height: 16),
-          GlassSurface(
-            radius: 16,
-            blurSigma: 16,
-            overlayColor: MingaTheme.glassOverlayXSoft,
-            child: TextField(
-              controller: _itemsController,
-              style: MingaTheme.body,
-              maxLines: 2,
-              decoration: InputDecoration(
-                labelText: 'Spot-IDs (optional)',
-                labelStyle: MingaTheme.bodySmall.copyWith(
-                  color: MingaTheme.textSubtle,
-                ),
-                hintText: 'id1, id2, id3',
-                hintStyle: MingaTheme.bodySmall.copyWith(
-                  color: MingaTheme.textSubtle,
-                ),
-                filled: true,
-                fillColor: MingaTheme.transparent,
-                border: const OutlineInputBorder(borderSide: BorderSide.none),
-              ),
-            ),
-          ),
+          _buildSpotsSection(),
         ],
       ),
     );
@@ -320,6 +298,261 @@ class _CollabCreateScreenState extends State<CollabCreateScreen> {
           ),
       ],
     );
+  }
+
+  Widget _buildSpotsSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text(
+              'Spots',
+              style: MingaTheme.titleSmall,
+            ),
+            const Spacer(),
+            TextButton.icon(
+              onPressed: _showSpotPicker,
+              icon: Icon(Icons.add, color: MingaTheme.accentGreen),
+              label: Text(
+                'Hinzufügen',
+                style: MingaTheme.body.copyWith(
+                  color: MingaTheme.accentGreen,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+        if (_selectedPlaces.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text(
+              'Füge deine Lieblings‑Spots hinzu (optional).',
+              style: MingaTheme.bodySmall.copyWith(
+                color: MingaTheme.textSubtle,
+              ),
+            ),
+          )
+        else
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _selectedPlaces.map((place) {
+              return InputChip(
+                label: Text(place.name),
+                onDeleted: () => _removeSelectedPlace(place.id),
+                deleteIconColor: MingaTheme.textPrimary,
+                backgroundColor: MingaTheme.glassOverlaySoft,
+                labelStyle: MingaTheme.bodySmall.copyWith(
+                  color: MingaTheme.textPrimary,
+                  fontWeight: FontWeight.w600,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(MingaTheme.radiusSm),
+                ),
+              );
+            }).toList(),
+          ),
+      ],
+    );
+  }
+
+  void _removeSelectedPlace(String placeId) {
+    setState(() {
+      _selectedPlaces =
+          _selectedPlaces.where((place) => place.id != placeId).toList();
+    });
+  }
+
+  Future<void> _showSpotPicker() async {
+    final currentUser = AuthService.instance.currentUser;
+    if (currentUser == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Bitte einloggen, um Spots hinzuzufügen.'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
+    final places =
+        await _placeRepository.fetchFavorites(userId: currentUser.id);
+    if (!mounted) return;
+
+    final selectedIds = _selectedPlaces.map((place) => place.id).toSet();
+    final result = await showModalBottomSheet<Set<String>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: MingaTheme.background,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (bottomSheetContext) {
+        final searchController = TextEditingController();
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            final query = searchController.text.trim().toLowerCase();
+            final filtered = query.isEmpty
+                ? places
+                : places.where((place) {
+                    return place.name.toLowerCase().contains(query) ||
+                        place.category.toLowerCase().contains(query);
+                  }).toList();
+
+            return SafeArea(
+              top: false,
+              child: Padding(
+                padding: EdgeInsets.only(
+                  left: 20,
+                  right: 20,
+                  top: 12,
+                  bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Spots hinzufügen',
+                            style: MingaTheme.titleMedium,
+                          ),
+                        ),
+                        IconButton(
+                          icon: Icon(
+                            Icons.close,
+                            color: MingaTheme.textSecondary,
+                          ),
+                          onPressed: () => Navigator.of(context).pop(),
+                        ),
+                      ],
+                    ),
+                    SizedBox(height: 8),
+                    TextField(
+                      controller: searchController,
+                      style: MingaTheme.body,
+                      decoration: InputDecoration(
+                        hintText: 'Suche in deinen gespeicherten Orten',
+                        hintStyle: MingaTheme.bodySmall.copyWith(
+                          color: MingaTheme.textSubtle,
+                        ),
+                        prefixIcon:
+                            Icon(Icons.search, color: MingaTheme.textSubtle),
+                        filled: true,
+                        fillColor: MingaTheme.glassOverlay,
+                        border: OutlineInputBorder(
+                          borderRadius:
+                              BorderRadius.circular(MingaTheme.radiusMd),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                      onChanged: (_) => setModalState(() {}),
+                    ),
+                    SizedBox(height: 12),
+                    Flexible(
+                      child: filtered.isEmpty
+                          ? Center(
+                              child: Text(
+                                'Keine gespeicherten Spots gefunden.',
+                                style: MingaTheme.bodySmall.copyWith(
+                                  color: MingaTheme.textSubtle,
+                                ),
+                              ),
+                            )
+                          : ListView.builder(
+                              shrinkWrap: true,
+                              itemCount: filtered.length,
+                              itemBuilder: (context, index) {
+                                final place = filtered[index];
+                                final isSelected =
+                                    selectedIds.contains(place.id);
+                                return ListTile(
+                                  contentPadding: EdgeInsets.zero,
+                                  leading: ClipRRect(
+                                    borderRadius: BorderRadius.circular(
+                                      MingaTheme.radiusSm,
+                                    ),
+                                    child: SizedBox(
+                                      width: 46,
+                                      height: 46,
+                                      child: PlaceImage(
+                                        imageUrl: place.imageUrl,
+                                        fit: BoxFit.cover,
+                                      ),
+                                    ),
+                                  ),
+                                  title: Text(
+                                    place.name,
+                                    style: MingaTheme.bodySmall.copyWith(
+                                      color: MingaTheme.textPrimary,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  subtitle: Text(
+                                    place.category,
+                                    style: MingaTheme.bodySmall.copyWith(
+                                      color: MingaTheme.textSubtle,
+                                    ),
+                                  ),
+                                  trailing: Checkbox(
+                                    value: isSelected,
+                                    activeColor: MingaTheme.accentGreen,
+                                    onChanged: (value) {
+                                      setModalState(() {
+                                        if (value == true) {
+                                          selectedIds.add(place.id);
+                                        } else {
+                                          selectedIds.remove(place.id);
+                                        }
+                                      });
+                                    },
+                                  ),
+                                  onTap: () {
+                                    setModalState(() {
+                                      if (isSelected) {
+                                        selectedIds.remove(place.id);
+                                      } else {
+                                        selectedIds.add(place.id);
+                                      }
+                                    });
+                                  },
+                                );
+                              },
+                            ),
+                    ),
+                    SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: selectedIds.isEmpty
+                            ? null
+                            : () => Navigator.of(context).pop(selectedIds),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: MingaTheme.accentGreen,
+                          foregroundColor: MingaTheme.textPrimary,
+                        ),
+                        child: Text('Übernehmen'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    if (!mounted || result == null) return;
+    setState(() {
+      _selectedPlaces = places
+          .where((place) => result.contains(place.id))
+          .toList();
+    });
   }
 
   Future<void> _addMedia() async {
