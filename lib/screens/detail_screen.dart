@@ -13,6 +13,7 @@ import '../services/chat_repository.dart';
 import '../services/supabase_chat_repository.dart';
 import '../services/supabase_gate.dart';
 import '../data/place_repository.dart';
+import '../utils/bottom_nav_padding.dart';
 import 'main_shell.dart';
 import 'creator_profile_screen.dart';
 
@@ -661,6 +662,9 @@ class _DetailScreenState extends State<DetailScreen> {
                     ),
                   ),
                 ),
+            SliverToBoxAdapter(
+              child: SizedBox(height: bottomNavSafePadding(context)),
+            ),
             ],
           ),
         ],
@@ -707,6 +711,13 @@ class _DetailScreenState extends State<DetailScreen> {
       );
     }
     if (place.status != null && place.status!.isNotEmpty) {
+      final rawStatus = place.status!.trim();
+      final normalizedStatus = rawStatus.toLowerCase();
+      if (normalizedStatus.contains('bestätigt') ||
+          normalizedStatus.contains('bestatigt') ||
+          normalizedStatus.contains('telefonisch')) {
+        // Skip legacy verification text like "Vor 3 Wochen telefonisch bestätigt".
+      } else {
       rows.add(
         Row(
           children: [
@@ -714,8 +725,8 @@ class _DetailScreenState extends State<DetailScreen> {
               width: 8,
               height: 8,
               decoration: BoxDecoration(
-                color: place.status!.toLowerCase() == 'open' ||
-                        place.status!.toLowerCase() == 'geöffnet'
+                color: normalizedStatus == 'open' ||
+                        normalizedStatus == 'geöffnet'
                     ? MingaTheme.successGreen
                     : MingaTheme.dangerRed,
                 shape: BoxShape.circle,
@@ -723,10 +734,10 @@ class _DetailScreenState extends State<DetailScreen> {
             ),
             SizedBox(width: 10),
             Text(
-              place.status!.toLowerCase() == 'open' ||
-                      place.status!.toLowerCase() == 'geöffnet'
+              normalizedStatus == 'open' ||
+                      normalizedStatus == 'geöffnet'
                   ? 'Geöffnet'
-                  : place.status!,
+                  : rawStatus,
               style: MingaTheme.body.copyWith(
                 color: MingaTheme.textSecondary,
                 fontWeight: FontWeight.w600,
@@ -735,6 +746,7 @@ class _DetailScreenState extends State<DetailScreen> {
           ],
         ),
       );
+      }
     }
     if (place.openingHoursJson != null && place.openingHoursJson!.isNotEmpty) {
       rows.add(_buildOpeningHours(place.openingHoursJson!));

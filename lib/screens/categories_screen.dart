@@ -3,6 +3,7 @@ import 'theme.dart';
 import '../data/place_repository.dart';
 import 'list_screen.dart';
 import 'main_shell.dart';
+import '../utils/bottom_nav_padding.dart';
 
 /// Screen showing all categories for a specific kind
 class CategoriesScreen extends StatelessWidget {
@@ -317,7 +318,12 @@ class _CategoriesViewState extends State<CategoriesView> {
                         ),
                       )
                     : GridView.builder(
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        padding: EdgeInsets.fromLTRB(
+                          20,
+                          0,
+                          20,
+                          bottomNavSafePadding(context),
+                        ),
                         gridDelegate:
                             const SliverGridDelegateWithFixedCrossAxisCount(
                           crossAxisCount: 3,

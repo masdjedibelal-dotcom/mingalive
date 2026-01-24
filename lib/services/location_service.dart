@@ -1,6 +1,7 @@
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'package:http/http.dart' as http;
 import '../models/app_location.dart';
 
 class LatLng {
@@ -11,6 +12,10 @@ class LatLng {
 }
 
 class LocationService {
+  static const String _geocodeBaseUrl =
+      'https://maps.googleapis.com/maps/api/geocode/json';
+  final String _apiKey = 'AIzaSyAFKjeD3q01MzDBWdubuhtFRhi3u4QbCfs';
+
   Future<AppLocation?> getCurrentLocation() async {
     final hasPermission = await _hasLocationPermission();
     if (!hasPermission) return null;
@@ -24,8 +29,13 @@ class LocationService {
       final position = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.medium,
       ).timeout(const Duration(seconds: 3));
+      final label = await _reverseGeocodeLabel(
+            position.latitude,
+            position.longitude,
+          ) ??
+          'In deiner Nähe';
       return AppLocation(
-        label: 'In deiner Nähe',
+        label: label,
         lat: position.latitude,
         lng: position.longitude,
         source: AppLocationSource.gps,
@@ -57,17 +67,62 @@ class LocationService {
   }
 
   Future<bool> _hasLocationPermission() async {
-    var status = await Permission.location.status;
-    if (status.isDenied || status.isRestricted || status.isLimited) {
-      await Permission.location.request();
-      status = await Permission.location.status;
+    var status = await Geolocator.checkPermission();
+    if (status == LocationPermission.denied ||
+        status == LocationPermission.deniedForever) {
+      status = await Geolocator.requestPermission();
     }
+    return status == LocationPermission.always ||
+        status == LocationPermission.whileInUse;
+  }
 
-    if (status.isPermanentlyDenied) {
-      return false;
+  Future<String?> _reverseGeocodeLabel(double lat, double lng) async {
+    if (_apiKey.isEmpty) return null;
+    try {
+      final uri = Uri.parse(_geocodeBaseUrl).replace(
+        queryParameters: {
+          'latlng': '$lat,$lng',
+          'key': _apiKey,
+          'language': 'de',
+          'result_type':
+              'locality|sublocality|sublocality_level_1|neighborhood',
+        },
+      );
+      final response = await http.get(uri).timeout(const Duration(seconds: 2));
+      if (response.statusCode != 200) return null;
+      final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+      final results = (decoded['results'] as List?) ?? [];
+      if (results.isEmpty) return null;
+      final components =
+          (results.first as Map<String, dynamic>)['address_components'] as List?;
+      if (components == null) return null;
+      String? city;
+      String? district;
+      for (final raw in components) {
+        if (raw is! Map) continue;
+        final types = (raw['types'] as List? ?? [])
+            .map((value) => value.toString())
+            .toList();
+        final name = raw['long_name']?.toString().trim();
+        if (name == null || name.isEmpty) continue;
+        if (types.contains('locality') ||
+            types.contains('postal_town') ||
+            types.contains('administrative_area_level_3')) {
+          city ??= name;
+        }
+        if (types.contains('sublocality') ||
+            types.contains('sublocality_level_1') ||
+            types.contains('neighborhood')) {
+          district ??= name;
+        }
+      }
+      if (city != null && district != null && district != city) {
+        return '$city $district';
+      }
+      return city ?? district;
+    } catch (_) {
+      return null;
     }
-
-    return status.isGranted || status.isLimited;
   }
 }
 

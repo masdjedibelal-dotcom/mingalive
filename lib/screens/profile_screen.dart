@@ -16,6 +16,7 @@ import 'collab_edit_screen.dart';
 import 'collab_detail_screen.dart';
 import '../widgets/collab_grid.dart';
 import '../widgets/place_grid.dart';
+import '../utils/bottom_nav_padding.dart';
 
 /// User profile screen with authentication
 class ProfileScreen extends StatefulWidget {
@@ -97,7 +98,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
               return SingleChildScrollView(
                 physics: const BouncingScrollPhysics(),
                 child: Padding(
-                  padding: const EdgeInsets.all(20.0),
+                  padding: EdgeInsets.fromLTRB(
+                    20,
+                    20,
+                    20,
+                    20 + bottomNavSafePadding(context),
+                  ),
                   child: _buildLoggedOutView(context),
                 ),
               );
@@ -267,10 +273,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
               return SingleChildScrollView(
                 physics: const BouncingScrollPhysics(),
                 child: Padding(
-                  padding: const EdgeInsets.all(20.0),
+                  padding: EdgeInsets.fromLTRB(
+                    20,
+                    20,
+                    20,
+                    20 + bottomNavSafePadding(context),
+                  ),
                   child: Column(
                     children: [
-                      SizedBox(height: 20),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          TextButton(
+                            onPressed: () async {
+                              await AuthService.instance.signOut();
+                            },
+                            child: Text(
+                              'Logout',
+                              style: MingaTheme.bodySmall.copyWith(
+                                color: MingaTheme.dangerRed,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: 8),
               // Avatar
               GestureDetector(
                 onTap: _isEditing ? () => _pickAvatar(currentUser.id) : null,
@@ -346,6 +374,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   radius: 16,
                   blurSigma: 16,
                   overlayColor: MingaTheme.glassOverlayXSoft,
+                  borderColor: Colors.transparent,
                   child: TextField(
                     controller: _bioController,
                     style: MingaTheme.body,
@@ -438,18 +467,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ],
               ),
               SizedBox(height: 8),
-              TextButton(
-                onPressed: () async {
-                  await AuthService.instance.signOut();
-                },
-                child: Text(
-                  'Logout',
-                  style: MingaTheme.bodySmall.copyWith(
-                    color: MingaTheme.textSubtle,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
               SizedBox(height: 20),
                       FutureBuilder<List<List<Collab>>>(
                         future: Future.wait([

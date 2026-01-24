@@ -180,9 +180,12 @@ class _AddSpotsToCollabSheetState extends State<_AddSpotsToCollabSheet> {
                 ),
               ),
               SizedBox(height: 16),
-              Text(
-                'Spots hinzufügen',
-                style: MingaTheme.titleMedium,
+              Padding(
+                padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top),
+                child: Text(
+                  'Spots hinzufügen',
+                  style: MingaTheme.titleMedium,
+                ),
               ),
               SizedBox(height: 12),
               TextField(

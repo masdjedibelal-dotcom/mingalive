@@ -215,10 +215,6 @@ class _SearchEntryScreenState extends State<SearchEntryScreen>
       appBar: AppBar(
         backgroundColor: MingaTheme.background,
         elevation: 0,
-        leading: IconButton(
-          icon: Icon(Icons.arrow_back, color: MingaTheme.textPrimary),
-          onPressed: widget.onClose ?? () => Navigator.of(context).pop(),
-        ),
         title: Text('Suche', style: MingaTheme.titleMedium),
       ),
       body: NestedScrollView(

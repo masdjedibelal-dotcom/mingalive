@@ -6,9 +6,8 @@ import '../services/supabase_profile_repository.dart';
 import '../services/supabase_gate.dart';
 import '../data/place_repository.dart';
 import '../widgets/collab_card.dart';
-import '../data/system_collabs.dart';
-import '../models/collab.dart';
 import '../models/place.dart';
+import '../utils/bottom_nav_padding.dart';
 import 'collab_detail_screen.dart';
 import 'creator_profile_screen.dart';
 import 'collab_create_screen.dart';
@@ -50,23 +49,18 @@ class _CollabsExploreScreenState extends State<CollabsExploreScreen> {
 
   Future<void> _loadData() async {
     try {
-      final systemCollabs = await SystemCollabsStore.load();
-      final systemAsCollabs = _mapSystemCollabs(systemCollabs);
-
       if (!SupabaseGate.isEnabled) {
         if (mounted) {
           setState(() {
-            _publicCollabs = systemAsCollabs;
+            _publicCollabs = [];
             _savedCollabs = [];
             _isLoading = false;
           });
         }
-        await _loadFallbackMediaForCollabs();
         return;
       }
 
       _publicCollabs = await _collabsRepository.fetchPublicCollabs();
-      _publicCollabs = [...systemAsCollabs, ..._publicCollabs];
 
       final currentUser = AuthService.instance.currentUser;
       if (currentUser != null) {
@@ -192,7 +186,12 @@ class _CollabsExploreScreenState extends State<CollabsExploreScreen> {
                         ),
                       )
                     : GridView.builder(
-                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                        padding: EdgeInsets.fromLTRB(
+                          16,
+                          8,
+                          16,
+                          bottomNavSafePadding(context),
+                        ),
                         gridDelegate:
                             const SliverGridDelegateWithFixedCrossAxisCount(
                           crossAxisCount: 2,
@@ -261,27 +260,6 @@ class _CollabsExploreScreenState extends State<CollabsExploreScreen> {
     });
   }
 
-  List<Collab> _mapSystemCollabs(List<CollabDefinition> defs) {
-    final now = DateTime.now();
-    return defs.asMap().entries.map((entry) {
-      final index = entry.key;
-      final def = entry.value;
-      return Collab(
-        id: def.id,
-        ownerId: 'localspots',
-        title: def.title,
-        description: def.subtitle,
-        isPublic: true,
-        coverMediaUrls: const [],
-        createdAt: now.subtract(Duration(minutes: index)),
-        creatorDisplayName: 'LocalSpots',
-        creatorUsername: 'LocalSpots',
-        creatorAvatarUrl: null,
-        creatorBadge: null,
-      );
-    }).toList();
-  }
-
   Future<void> _loadFallbackMediaForCollabs() async {
     final collabs = List<Collab>.from(_publicCollabs);
     if (collabs.isEmpty) return;
@@ -290,17 +268,12 @@ class _CollabsExploreScreenState extends State<CollabsExploreScreen> {
     for (final collab in collabs) {
       if (collab.coverMediaUrls.isNotEmpty) continue;
       if (updated.containsKey(collab.id)) continue;
-      final systemDef = SystemCollabsStore.findById(collab.id);
       List<Place> places = [];
-      if (systemDef != null) {
-        places = await _placeRepository.fetchPlacesForCollab(systemDef);
-      } else {
-        final placeIds =
-            await _collabsRepository.fetchCollabPlaceIds(collabId: collab.id);
-        if (placeIds.isEmpty) continue;
-        places = await _placeRepository.fetchPlacesByIds(placeIds);
-        places = _orderPlacesByIds(places, placeIds);
-      }
+      final placeIds =
+          await _collabsRepository.fetchCollabPlaceIds(collabId: collab.id);
+      if (placeIds.isEmpty) continue;
+      places = await _placeRepository.fetchPlacesByIds(placeIds);
+      places = _orderPlacesByIds(places, placeIds);
 
       final urls = _extractPlaceImages(places);
       if (urls.isNotEmpty) {

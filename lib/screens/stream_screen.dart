@@ -15,7 +15,6 @@ import '../widgets/add_to_collab_sheet.dart';
 import '../widgets/glass/glass_badge.dart';
 import '../widgets/glass/glass_button.dart';
 import '../widgets/glass/glass_surface.dart';
-import '../widgets/place_image.dart';
 import '../services/chat_repository.dart';
 import '../services/supabase_chat_repository.dart';
 import '../services/supabase_gate.dart';
@@ -865,7 +864,6 @@ class _StreamChatPaneState extends State<StreamChatPane> {
   StreamSubscription<List<ChatMessage>>? _messagesSubscription;
   StreamSubscription<List<RoomMediaPost>>? _mediaSubscription;
   StreamSubscription<List<PresenceProfile>>? _presenceRosterSubscription;
-  final ScrollController _chatScrollController = ScrollController();
   List<ChatMessage> _messages = [];
   final List<ChatMessage> _systemMessages = [];
   List<RoomMediaPost> _mediaPosts = [];
@@ -873,7 +871,6 @@ class _StreamChatPaneState extends State<StreamChatPane> {
   final Map<String, UserPresence> _userPresences = {};
   Timer? _reactionRefreshTimer;
   List<PresenceProfile> _presenceRoster = [];
-  bool _isMediaCollapsed = false;
 
   @override
   void initState() {
@@ -947,7 +944,6 @@ class _StreamChatPaneState extends State<StreamChatPane> {
       final supabaseRepo = _chatRepository as SupabaseChatRepository;
       supabaseRepo.leaveRoomPresence(roomId);
     }
-    _chatScrollController.dispose();
     _reactionRefreshTimer?.cancel();
     super.dispose();
   }
@@ -960,77 +956,78 @@ class _StreamChatPaneState extends State<StreamChatPane> {
         .where((message) => message.mediaUrl == null || message.mediaUrl!.isEmpty)
         .toList();
     final displayMessages = _buildDisplayMessages(textMessages);
-    final mediaHeight = _mediaHeightForCount(textMessages.length);
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        return Column(
-          children: [
-            AnimatedContainer(
-              duration: tokens.motion.med,
-              curve: tokens.motion.curve,
-              height: mediaHeight,
-              width: double.infinity,
-              child: Stack(
-                children: [
-                  Positioned.fill(
-                    child: MediaCard(
-                      place: widget.place,
-                      mediaPosts: _mediaPosts,
-                      liveCount: widget.liveCount,
-                      borderRadius: BorderRadius.zero,
-                      topRightActions: null,
-                      useAspectRatio: false,
-                    ),
-                  ),
-                  Positioned(
-                    right: tokens.space.s8,
-                    top: tokens.space.s8,
-                    child: IconButton(
-                      onPressed: _toggleMediaCollapsed,
-                      icon: Icon(
-                        _isMediaCollapsed
-                            ? Icons.unfold_more
-                            : Icons.unfold_less,
-                        color: tokens.colors.textPrimary,
-                      ),
-                      splashRadius: tokens.space.s20,
-                    ),
-                  ),
-                ],
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: MediaCard(
+            place: widget.place,
+            mediaPosts: _mediaPosts,
+            liveCount: widget.liveCount,
+            borderRadius: BorderRadius.zero,
+            topRightActions: null,
+            useAspectRatio: false,
+            useTopSafeArea: false,
+          ),
+        ),
+        DraggableScrollableSheet(
+          initialChildSize: 0.5,
+          minChildSize: 0.2,
+          maxChildSize: 0.92,
+          builder: (context, scrollController) {
+            return Container(
+              decoration: BoxDecoration(
+                color: tokens.colors.bg,
+                borderRadius: BorderRadius.vertical(
+                  top: Radius.circular(tokens.radius.lg),
+                ),
               ),
-            ),
-            SizedBox(height: tokens.space.s8),
-            Expanded(
               child: Column(
                 children: [
-                  Expanded(
-                    child: _buildChatList(
-                      displayMessages,
-                      _chatScrollController,
+                  SizedBox(height: tokens.space.s8),
+                  Container(
+                    width: tokens.space.s32,
+                    height: tokens.space.s4,
+                    decoration: BoxDecoration(
+                      color: tokens.colors.textMuted.withOpacity(0.5),
+                      borderRadius: BorderRadius.circular(tokens.radius.pill),
                     ),
+                  ),
+                  Padding(
+                    padding: EdgeInsets.fromLTRB(
+                      tokens.space.s16,
+                      tokens.space.s12,
+                      tokens.space.s16,
+                      tokens.space.s8,
+                    ),
+                    child: Row(
+                      children: [
+                        Text(
+                          'Live-Chat',
+                          style: tokens.type.title.copyWith(
+                            color: tokens.colors.textPrimary,
+                          ),
+                        ),
+                        const Spacer(),
+                        Text(
+                          '${displayMessages.length} Nachrichten',
+                          style: tokens.type.caption.copyWith(
+                            color: tokens.colors.textMuted,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: _buildChatList(displayMessages, scrollController),
                   ),
                   _buildChatInput(roomId),
                 ],
               ),
-            ),
-          ],
-        );
-      },
+            );
+          },
+        ),
+      ],
     );
-  }
-
-  double _mediaHeightForCount(int messageCount) {
-    if (_isMediaCollapsed) return 120;
-    if (messageCount >= 10) return 160;
-    if (messageCount >= 5) return 200;
-    return 260;
-  }
-
-  void _toggleMediaCollapsed() {
-    setState(() {
-      _isMediaCollapsed = !_isMediaCollapsed;
-    });
   }
 
   Widget _buildChatList(
@@ -1331,7 +1328,6 @@ class _StreamChatRoomScreenState extends State<StreamChatRoomScreen> {
   StreamSubscription<List<RoomMediaPost>>? _mediaSubscription;
   StreamSubscription<int>? _presenceSubscription;
   StreamSubscription<List<PresenceProfile>>? _presenceRosterSubscription;
-  final ScrollController _chatScrollController = ScrollController();
   List<ChatMessage> _messages = [];
   final List<ChatMessage> _systemMessages = [];
   List<RoomMediaPost> _mediaPosts = [];
@@ -1416,7 +1412,6 @@ class _StreamChatRoomScreenState extends State<StreamChatRoomScreen> {
       final supabaseRepo = _chatRepository as SupabaseChatRepository;
       supabaseRepo.leaveRoomPresence(roomId);
     }
-    _chatScrollController.dispose();
     super.dispose();
   }
 
@@ -1463,122 +1458,147 @@ class _StreamChatRoomScreenState extends State<StreamChatRoomScreen> {
       body: Stack(
         children: [
           Positioned.fill(
-            child: PlaceImage(
-              imageUrl: widget.place.imageUrl,
-              fit: BoxFit.cover,
+            child: MediaCard(
+              place: widget.place,
+              mediaPosts: _mediaPosts,
+              liveCount: liveCount,
+              borderRadius: BorderRadius.zero,
+              topRightActions: null,
+              useAspectRatio: false,
+              useTopSafeArea: true,
             ),
           ),
-          Positioned.fill(
-            child: Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    tokens.colors.bg.withOpacity(0.9),
-                    tokens.colors.bg.withOpacity(0.6),
-                    tokens.colors.bg.withOpacity(0.9),
-                  ],
+          DraggableScrollableSheet(
+            initialChildSize: 0.5,
+            minChildSize: 0.2,
+            maxChildSize: 0.92,
+            builder: (context, scrollController) {
+              return Container(
+                decoration: BoxDecoration(
+                  color: tokens.colors.bg,
+                  borderRadius: BorderRadius.vertical(
+                    top: Radius.circular(tokens.radius.lg),
+                  ),
                 ),
-              ),
-            ),
-          ),
-          Column(
-            children: [
-              SizedBox(
-                height: 260,
-                width: double.infinity,
-                child: MediaCard(
-                  place: widget.place,
-                  mediaPosts: _mediaPosts,
-                  liveCount: liveCount,
-                  borderRadius: BorderRadius.zero,
-                  topRightActions: null,
-                  useAspectRatio: false,
-                ),
-              ),
-              Expanded(
-                child: GlassSurface(
-                  radius: tokens.radius.sm,
-                  blur: tokens.blur.med,
-                  scrim: tokens.card.glassOverlay,
-                  borderColor: tokens.colors.transparent,
-                  child: displayMessages.isEmpty
-                      ? Center(
-                          child: Text(
-                            'Noch keine Nachrichten',
+                child: Column(
+                  children: [
+                    SizedBox(height: tokens.space.s8),
+                    Container(
+                      width: tokens.space.s32,
+                      height: tokens.space.s4,
+                      decoration: BoxDecoration(
+                        color: tokens.colors.textMuted.withOpacity(0.5),
+                        borderRadius:
+                            BorderRadius.circular(tokens.radius.pill),
+                      ),
+                    ),
+                    Padding(
+                      padding: EdgeInsets.fromLTRB(
+                        tokens.space.s16,
+                        tokens.space.s12,
+                        tokens.space.s16,
+                        tokens.space.s8,
+                      ),
+                      child: Row(
+                        children: [
+                          Text(
+                            'Live-Chat',
+                            style: tokens.type.title.copyWith(
+                              color: tokens.colors.textPrimary,
+                            ),
+                          ),
+                          const Spacer(),
+                          Text(
+                            '${displayMessages.length} Nachrichten',
                             style: tokens.type.caption.copyWith(
                               color: tokens.colors.textMuted,
                             ),
                           ),
-                        )
-                      : ListView.builder(
-                          controller: _chatScrollController,
-                          reverse: true,
-                          physics: const BouncingScrollPhysics(),
-                          padding: EdgeInsets.symmetric(
-                            horizontal: tokens.space.s16,
-                            vertical: tokens.space.s8,
-                          ),
-                          itemCount: displayMessages.length,
-                          itemBuilder: (context, index) {
-                            final message = displayMessages[
-                                displayMessages.length - 1 - index];
-                            return AnimatedSwitcher(
-                              duration: tokens.motion.med,
-                              child: ChatMessageTile(
-                                key: ValueKey(message.id),
-                                message: message,
-                                onReact: (reaction) =>
-                                    _handleMessageReaction(message, reaction),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: displayMessages.isEmpty
+                          ? Center(
+                              child: Text(
+                                'Noch keine Nachrichten',
+                                style: tokens.type.caption.copyWith(
+                                  color: tokens.colors.textMuted,
+                                ),
                               ),
+                            )
+                          : ListView.builder(
+                              controller: scrollController,
+                              reverse: true,
+                              physics: const BouncingScrollPhysics(),
+                              padding: EdgeInsets.symmetric(
+                                horizontal: tokens.space.s16,
+                                vertical: tokens.space.s8,
+                              ),
+                              itemCount: displayMessages.length,
+                              itemBuilder: (context, index) {
+                                final message = displayMessages[
+                                    displayMessages.length - 1 - index];
+                                return AnimatedSwitcher(
+                                  duration: tokens.motion.med,
+                                  child: ChatMessageTile(
+                                    key: ValueKey(message.id),
+                                    message: message,
+                                    onReact: (reaction) =>
+                                        _handleMessageReaction(
+                                            message, reaction),
+                                  ),
+                                );
+                              },
+                            ),
+                    ),
+                    SafeArea(
+                      top: false,
+                      child: Builder(
+                        builder: (context) {
+                          final currentUser = AuthService.instance.currentUser;
+                          if (currentUser == null) {
+                            return ChatInput(
+                              roomId: roomId,
+                              userId: '',
+                              onSend: (_, __, ___) async {},
+                              placeholder: 'Schreib etwas…',
+                              enabled: false,
                             );
-                          },
-                        ),
-                ),
-              ),
-              SafeArea(
-                top: false,
-                child: Builder(
-                  builder: (context) {
-                    final currentUser = AuthService.instance.currentUser;
-                    if (currentUser == null) {
-                      return ChatInput(
-                        roomId: roomId,
-                        userId: '',
-                        onSend: (_, __, ___) async {},
-                        placeholder: 'Schreib etwas…',
-                        enabled: false,
-                      );
-                    }
-                    return ChatInput(
-                      roomId: roomId,
-                      userId: currentUser.id,
-                      onSend: (roomId, userId, text) async {
-                        if (_chatRepository is SupabaseChatRepository) {
-                          final repo =
-                              _chatRepository as SupabaseChatRepository;
-                          await repo.sendTextMessage(roomId, userId, text);
-                        } else {
-                          final message = ChatMessage(
-                            id: 'temp_${DateTime.now().millisecondsSinceEpoch}',
+                          }
+                          return ChatInput(
                             roomId: roomId,
-                            userId: userId,
-                            userName: currentUser.name,
-                            userAvatar: currentUser.photoUrl,
-                            text: text,
-                            createdAt: DateTime.now(),
-                            isMine: true,
+                            userId: currentUser.id,
+                            onSend: (roomId, userId, text) async {
+                              if (_chatRepository is SupabaseChatRepository) {
+                                final repo =
+                                    _chatRepository as SupabaseChatRepository;
+                                await repo.sendTextMessage(
+                                    roomId, userId, text);
+                              } else {
+                                final message = ChatMessage(
+                                  id:
+                                      'temp_${DateTime.now().millisecondsSinceEpoch}',
+                                  roomId: roomId,
+                                  userId: userId,
+                                  userName: currentUser.name,
+                                  userAvatar: currentUser.photoUrl,
+                                  text: text,
+                                  createdAt: DateTime.now(),
+                                  isMine: true,
+                                );
+                                _chatRepository.sendMessage(roomId, message);
+                              }
+                            },
+                            placeholder: 'Schreib etwas…',
                           );
-                          _chatRepository.sendMessage(roomId, message);
-                        }
-                      },
-                      placeholder: 'Schreib etwas…',
-                    );
-                  },
+                        },
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-            ],
+              );
+            },
           ),
         ],
       ),
@@ -1803,9 +1823,9 @@ class StreamHeader extends StatelessWidget {
       child: Padding(
         padding: EdgeInsets.fromLTRB(
           tokens.space.s12,
-          tokens.space.s8,
+          tokens.space.s4,
           tokens.space.s12,
-          tokens.space.s8,
+          tokens.space.s6,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,

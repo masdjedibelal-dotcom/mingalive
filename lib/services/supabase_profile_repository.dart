@@ -41,6 +41,26 @@ class SupabaseProfileRepository {
       return;
     }
 
+    final existing = await fetchProfile(userId);
+    if (existing != null) {
+      final needsName = existing.displayName.trim().isEmpty;
+      final needsAvatar =
+          existing.avatarUrl == null || existing.avatarUrl!.trim().isEmpty;
+      if (needsName || needsAvatar) {
+        await upsertProfile(
+          UserProfile(
+            id: userId,
+            displayName: needsName ? name : existing.displayName,
+            username: existing.username,
+            avatarUrl: needsAvatar ? avatarUrl : existing.avatarUrl,
+            bio: existing.bio,
+          ),
+        );
+      }
+      _upsertedProfiles.add(userId);
+      return;
+    }
+
     await upsertProfile(
       UserProfile(
         id: userId,

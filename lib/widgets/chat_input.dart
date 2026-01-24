@@ -191,6 +191,18 @@ class _ChatInputState extends State<ChatInput> {
                       borderRadius: BorderRadius.circular(tokens.radius.pill),
                       borderSide: BorderSide.none,
                     ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(tokens.radius.pill),
+                      borderSide: BorderSide.none,
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(tokens.radius.pill),
+                      borderSide: BorderSide.none,
+                    ),
+                    disabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(tokens.radius.pill),
+                      borderSide: BorderSide.none,
+                    ),
                     contentPadding: EdgeInsets.symmetric(
                       horizontal: tokens.space.s12,
                       vertical: tokens.space.s8,

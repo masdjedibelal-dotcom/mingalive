@@ -11,7 +11,6 @@ import 'creator_profile_screen.dart';
 import 'collabs_explore_screen.dart';
 import 'collab_detail_screen.dart';
 import '../models/collab.dart';
-import '../data/system_collabs.dart';
 import '../models/app_location.dart';
 import '../services/supabase_collabs_repository.dart';
 import '../services/supabase_profile_repository.dart';
@@ -23,6 +22,7 @@ import '../widgets/collab_card.dart';
 import '../widgets/collab_carousel.dart';
 import '../state/location_store.dart';
 import '../utils/distance_utils.dart';
+import '../utils/bottom_nav_padding.dart';
 import 'location_picker_sheet.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -49,6 +49,7 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Collab> _publicCollabs = [];
   final Map<String, int> _collabSaveCounts = {};
   final Map<String, UserProfile> _creatorProfiles = {};
+  final Map<String, List<String>> _fallbackMediaByCollabId = {};
   bool _showQuickIntro = true;
   static const String _quickIntroKey = 'home_quick_intro_dismissed';
   static const double _hypeMaxDistanceKm = 20;
@@ -343,13 +344,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _loadDiscoveryCollabs() async {
     try {
-      final systemDefs = await SystemCollabsStore.load();
-      final systemCollabs = _mapSystemCollabs(systemDefs);
-
       if (!SupabaseGate.isEnabled) {
         if (mounted) {
           setState(() {
-            _publicCollabs = systemCollabs;
+            _publicCollabs = [];
             _isCollabLoading = false;
           });
         }
@@ -357,7 +355,7 @@ class _HomeScreenState extends State<HomeScreen> {
       }
 
       final collabs = await _collabsRepository.fetchPublicCollabs();
-      final combined = [...systemCollabs, ...collabs];
+      final combined = [...collabs];
 
       final userIds = collabs.map((list) => list.ownerId).toSet();
       final profiles = await Future.wait(
@@ -381,6 +379,7 @@ class _HomeScreenState extends State<HomeScreen> {
           _isCollabLoading = false;
         });
       }
+      _loadFallbackMediaForCollabs(combined);
     } catch (e) {
       if (kDebugMode) {
         debugPrint('❌ HomeScreen: Failed to load collabs: $e');
@@ -393,25 +392,48 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  List<Collab> _mapSystemCollabs(List<CollabDefinition> defs) {
-    final now = DateTime.now();
-    return defs.asMap().entries.map((entry) {
-      final index = entry.key;
-      final def = entry.value;
-      return Collab(
-        id: def.id,
-        ownerId: 'localspots',
-        title: def.title,
-        description: def.subtitle,
-        isPublic: true,
-        coverMediaUrls: const [],
-        createdAt: now.subtract(Duration(minutes: index)),
-        creatorDisplayName: 'LocalSpots',
-        creatorUsername: 'LocalSpots',
-        creatorAvatarUrl: null,
-        creatorBadge: null,
-      );
-    }).toList();
+  Future<void> _loadFallbackMediaForCollabs(
+    List<Collab> collabs,
+  ) async {
+    if (!SupabaseGate.isEnabled || collabs.isEmpty) return;
+    for (final collab in collabs) {
+      if (collab.coverMediaUrls.isNotEmpty) continue;
+      final existing = _fallbackMediaByCollabId[collab.id];
+      if (existing != null && existing.isNotEmpty) continue;
+      try {
+        final placeIds = await _collabsRepository.fetchCollabPlaceIds(
+          collabId: collab.id,
+        );
+        if (placeIds.isEmpty) continue;
+        final fetched = await _repository.fetchPlacesByIds(placeIds);
+        final byId = {
+          for (final place in fetched) place.id: place,
+        };
+        final places = placeIds.map((id) => byId[id]).whereType<Place>().toList();
+        final urls = _extractPlaceImages(places);
+        if (!mounted || urls.isEmpty) continue;
+        setState(() {
+          _fallbackMediaByCollabId[collab.id] = urls;
+        });
+      } catch (e) {
+        if (kDebugMode) {
+          debugPrint(
+            '⚠️ HomeScreen: fallback media failed for ${collab.id}: $e',
+          );
+        }
+      }
+    }
+  }
+
+  List<String> _extractPlaceImages(List<Place> places) {
+    final urls = <String>[];
+    for (final place in places) {
+      final url = place.imageUrl.trim();
+      if (url.isEmpty) continue;
+      urls.add(url);
+      if (urls.length >= 5) break;
+    }
+    return urls;
   }
 
   List<Collab> get _popularCollabs {
@@ -476,7 +498,10 @@ class _HomeScreenState extends State<HomeScreen> {
     final profile = _creatorProfiles[collab.ownerId];
     final creatorLabel = _resolveCreatorLabel(collab);
     final creatorAvatar = _resolveCreatorAvatar(collab);
-    final mediaUrls = collab.coverMediaUrls;
+    final fallbackUrls = _fallbackMediaByCollabId[collab.id] ?? const [];
+    final mediaUrls = collab.coverMediaUrls.isNotEmpty
+        ? collab.coverMediaUrls
+        : fallbackUrls;
     final collabIds = collabs.map((item) => item.id).toList();
     final initialIndex = collabIds.indexOf(collab.id);
 
@@ -487,7 +512,9 @@ class _HomeScreenState extends State<HomeScreen> {
       creatorId: collab.ownerId,
       creatorBadge: profile?.badge ?? collab.creatorBadge,
       mediaUrls: mediaUrls,
-      imageUrl: mediaUrls.isNotEmpty ? mediaUrls.first : null,
+      imageUrl: collab.coverMediaUrls.isNotEmpty
+          ? null
+          : (fallbackUrls.isNotEmpty ? fallbackUrls.first : null),
       gradientKey: 'mint',
       onCreatorTap: () {
         Navigator.of(context).push(
@@ -529,10 +556,15 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       backgroundColor: MingaTheme.background,
       body: SafeArea(
-        child: SingleChildScrollView(
+          child: SingleChildScrollView(
           physics: const BouncingScrollPhysics(),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20.0),
+              padding: EdgeInsets.fromLTRB(
+                20,
+                0,
+                20,
+                bottomNavSafePadding(context),
+              ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [

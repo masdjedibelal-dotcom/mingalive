@@ -16,7 +16,10 @@ class PlaceSuggestion {
 
 class PlacesAutocompleteService {
   static const String _baseUrl = 'https://maps.googleapis.com/maps/api/place';
-  final String _apiKey = const String.fromEnvironment('AIzaSyAFKjeD3q01MzDBWdubuhtFRhi3u4QbCfs');
+  final String _apiKey = 'AIzaSyAFKjeD3q01MzDBWdubuhtFRhi3u4QbCfs';
+  String? _lastErrorMessage;
+
+  String? get lastErrorMessage => _lastErrorMessage;
 
   String newSessionToken() => _randomToken(16);
 
@@ -24,7 +27,13 @@ class PlacesAutocompleteService {
     required String input,
     required String sessionToken,
   }) async {
-    if (_apiKey.isEmpty || input.trim().isEmpty) return [];
+    _lastErrorMessage = null;
+    if (_apiKey.isEmpty || input.trim().isEmpty) {
+      if (_apiKey.isEmpty && input.trim().isNotEmpty) {
+        _lastErrorMessage = 'Google API Key fehlt.';
+      }
+      return [];
+    }
     final uri = Uri.parse('$_baseUrl/autocomplete/json').replace(
       queryParameters: {
         'input': input,
@@ -36,8 +45,19 @@ class PlacesAutocompleteService {
     );
 
     final response = await http.get(uri);
-    if (response.statusCode != 200) return [];
+    if (response.statusCode != 200) {
+      _lastErrorMessage = 'Google API Fehler (${response.statusCode}).';
+      return [];
+    }
     final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+    final status = decoded['status']?.toString();
+    if (status != null &&
+        status != 'OK' &&
+        status != 'ZERO_RESULTS') {
+      _lastErrorMessage =
+          (decoded['error_message'] as String?) ?? 'Google API Fehler: $status';
+      return [];
+    }
     final predictions = decoded['predictions'] as List? ?? [];
     return predictions
         .map((item) => Map<String, dynamic>.from(item))

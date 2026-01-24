@@ -10,6 +10,7 @@ import '../services/supabase_profile_repository.dart';
 import '../widgets/activity_badge.dart';
 import 'detail_screen.dart';
 import 'user_profile_screen.dart';
+import '../utils/bottom_nav_padding.dart';
 
 /// Screen showing places in a favorite list
 class FavoritesListScreen extends StatefulWidget {
@@ -177,7 +178,12 @@ class _FavoritesListScreenState extends State<FavoritesListScreen> {
                             ),
                           )
                         : ListView.builder(
-                            padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+                            padding: EdgeInsets.fromLTRB(
+                              20,
+                              8,
+                              20,
+                              bottomNavSafePadding(context),
+                            ),
                             itemCount: _places.length,
                             itemBuilder: (context, index) {
                               final place = _places[index];

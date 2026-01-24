@@ -11,6 +11,7 @@ import 'live_badge.dart';
 import 'reaction_bar.dart';
 import 'media/media_carousel.dart';
 import 'media/media_viewer.dart';
+import '../theme/app_tokens.dart';
 import '../theme/app_theme_extensions.dart';
 import '../widgets/glass/glass_badge.dart';
 import '../widgets/glass/glass_surface.dart';
@@ -26,6 +27,7 @@ class MediaCard extends StatefulWidget {
   final Widget? topRightActions;
   final BorderRadius? borderRadius;
   final bool useAspectRatio;
+  final bool useTopSafeArea;
 
   const MediaCard({
     super.key,
@@ -35,6 +37,7 @@ class MediaCard extends StatefulWidget {
     this.topRightActions,
     this.borderRadius,
     this.useAspectRatio = true,
+    this.useTopSafeArea = true,
   });
 
   @override
@@ -75,6 +78,41 @@ class _MediaCardState extends State<MediaCard> {
     setState(() {
       _showReactions = !_showReactions;
     });
+  }
+
+  Widget _buildTopOverlay(AppTokens tokens, bool isLiveMedia) {
+    return Container(
+      padding: EdgeInsets.all(tokens.space.s12),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            tokens.colors.scrimStrong,
+            tokens.colors.transparent,
+          ],
+        ),
+      ),
+      child: Row(
+        children: [
+          LiveBadge(
+            liveCount: widget.liveCount,
+            compact: true,
+          ),
+          if (isLiveMedia)
+            Padding(
+              padding: EdgeInsets.only(left: tokens.space.s8),
+              child: GlassBadge(
+                label: 'Live',
+                variant: GlassBadgeVariant.live,
+              ),
+            ),
+          const Spacer(),
+          SizedBox(width: tokens.space.s8),
+          if (widget.topRightActions != null) widget.topRightActions!,
+        ],
+      ),
+    );
   }
 
   void _setMedia(List<RoomMediaPost> posts) {
@@ -304,42 +342,12 @@ class _MediaCardState extends State<MediaCard> {
             top: 0,
             left: 0,
             right: 0,
-            child: SafeArea(
-              bottom: false,
-              child: Container(
-                padding: EdgeInsets.all(tokens.space.s12),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      tokens.colors.scrimStrong,
-                      tokens.colors.transparent,
-                    ],
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    LiveBadge(
-                      liveCount: widget.liveCount,
-                      compact: true,
-                    ),
-                    if (isLiveMedia)
-                      Padding(
-                        padding: EdgeInsets.only(left: tokens.space.s8),
-                        child: GlassBadge(
-                          label: 'Live',
-                          variant: GlassBadgeVariant.live,
-                        ),
-                      ),
-                    const Spacer(),
-                    SizedBox(width: tokens.space.s8),
-                    // Right: optional actions
-                    if (widget.topRightActions != null) widget.topRightActions!,
-                  ],
-                ),
-              ),
-            ),
+            child: widget.useTopSafeArea
+                ? SafeArea(
+                    bottom: false,
+                    child: _buildTopOverlay(tokens, isLiveMedia),
+                  )
+                : _buildTopOverlay(tokens, isLiveMedia),
           ),
           // Reactions row overlay at bottom-right
           if (currentMediaPost != null)

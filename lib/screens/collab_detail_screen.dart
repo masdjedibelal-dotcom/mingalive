@@ -26,6 +26,7 @@ import '../widgets/glass/glass_bottom_sheet.dart';
 import '../data/system_collabs.dart';
 import '../theme/app_theme_extensions.dart';
 import '../theme/app_tokens.dart';
+import '../utils/bottom_nav_padding.dart';
 import 'add_spots_to_collab_sheet.dart';
 import 'detail_screen.dart';
 import 'main_shell.dart';
@@ -772,6 +773,7 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
     final collabDefinition = _findCollab(collabId);
     if (collabDefinition != null) {
       return SingleChildScrollView(
+        padding: EdgeInsets.only(bottom: bottomNavSafePadding(context)),
         child: Column(
           children: [
             _buildHero(collabId, collabDefinition),
@@ -793,6 +795,7 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
       return _buildMissingCollab();
     }
     return SingleChildScrollView(
+      padding: EdgeInsets.only(bottom: bottomNavSafePadding(context)),
       child: Column(
         children: [
           _buildSupabaseHero(collabId, collab),

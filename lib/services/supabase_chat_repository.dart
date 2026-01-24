@@ -170,7 +170,7 @@ class SupabaseChatRepository {
     try {
       if (currentUserId != null) {
         final userReactions = await supabase
-            .from('room_media_reactions')
+            .from('room_message_reactions')
             .select('message_id,reaction')
             .eq('user_id', currentUserId)
             .inFilter('message_id', messageIds);
@@ -189,7 +189,7 @@ class SupabaseChatRepository {
 
     try {
       final allReactions = await supabase
-          .from('room_media_reactions')
+          .from('room_message_reactions')
           .select('message_id,reaction')
           .inFilter('message_id', messageIds);
       for (final row in allReactions as List) {
@@ -242,7 +242,7 @@ class SupabaseChatRepository {
     try {
       final supabase = SupabaseGate.client;
       final existingRows = await supabase
-          .from('room_media_reactions')
+          .from('room_message_reactions')
           .select('reaction')
           .eq('message_id', messageId)
           .eq('user_id', currentUser.id);
@@ -253,7 +253,7 @@ class SupabaseChatRepository {
 
       if (existingEmoji == reaction) {
         await supabase
-            .from('room_media_reactions')
+            .from('room_message_reactions')
             .delete()
             .eq('message_id', messageId)
             .eq('user_id', currentUser.id);
@@ -266,7 +266,7 @@ class SupabaseChatRepository {
         'reaction': reaction,
       };
       await supabase
-          .from('room_media_reactions')
+          .from('room_message_reactions')
           .upsert(data, onConflict: 'message_id,user_id');
       return true;
     } catch (e) {
@@ -962,13 +962,29 @@ class SupabaseChatRepository {
 
     final dynamic state = channel.presenceState();
     final profiles = <PresenceProfile>[];
+    Map<String, dynamic>? toPayload(dynamic presence) {
+      if (presence is Map) {
+        final raw = presence['payload'] ?? presence;
+        if (raw is Map) {
+          return Map<String, dynamic>.from(raw);
+        }
+        return Map<String, dynamic>.from(presence);
+      }
+      try {
+        final dynamic raw = (presence as dynamic).payload;
+        if (raw is Map) {
+          return Map<String, dynamic>.from(raw);
+        }
+      } catch (_) {}
+      return null;
+    }
     if (state is Map) {
       for (final entry in state.entries) {
         final entries = entry.value;
         if (entries is Iterable) {
           for (final presence in entries) {
-            final payload = (presence as dynamic).payload ?? presence;
-            if (payload is Map) {
+            final payload = toPayload(presence);
+            if (payload != null) {
               final userId =
                   (payload['user_id'] as String?)?.trim().isNotEmpty == true
                       ? payload['user_id'] as String
@@ -991,8 +1007,8 @@ class SupabaseChatRepository {
       }
     } else if (state is List) {
       for (final presence in state) {
-        final payload = (presence as dynamic).payload ?? presence;
-        if (payload is Map) {
+        final payload = toPayload(presence);
+        if (payload != null) {
           final userId =
               (payload['user_id'] as String?)?.trim().isNotEmpty == true
                   ? payload['user_id'] as String

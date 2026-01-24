@@ -7,6 +7,7 @@ import 'detail_screen.dart';
 import '../widgets/place_image.dart';
 import '../widgets/place_distance_text.dart';
 import '../theme/app_theme_extensions.dart';
+import '../utils/bottom_nav_padding.dart';
 
 /// Screen showing places filtered by category or search term
 class ListScreen extends StatefulWidget {
@@ -323,9 +324,11 @@ class _ListScreenState extends State<ListScreen> {
                     ),
                     Expanded(
                       child: ListView.separated(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 20,
-                          vertical: 12,
+                        padding: EdgeInsets.fromLTRB(
+                          20,
+                          12,
+                          20,
+                          bottomNavSafePadding(context),
                         ),
                         itemCount: places.length,
                         separatorBuilder: (_, __) => Divider(
@@ -350,7 +353,12 @@ class _ListScreenState extends State<ListScreen> {
 
   Widget _buildSkeletonList() {
     return ListView.separated(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      padding: EdgeInsets.fromLTRB(
+        20,
+        12,
+        20,
+        bottomNavSafePadding(context),
+      ),
       itemCount: 6,
       separatorBuilder: (_, __) => Divider(
         color: MingaTheme.borderSubtle,

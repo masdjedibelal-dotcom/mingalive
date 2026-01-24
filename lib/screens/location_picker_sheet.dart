@@ -27,6 +27,7 @@ class _LocationPickerSheetState extends State<LocationPickerSheet> {
   bool _isLoading = false;
   bool _isResolving = false;
   List<PlaceSuggestion> _suggestions = [];
+  String? _suggestionError;
   late final String _sessionToken;
 
   @override
@@ -66,7 +67,8 @@ class _LocationPickerSheetState extends State<LocationPickerSheet> {
     );
     if (!mounted) return;
     setState(() {
-      _suggestions = results;
+      _suggestions = results.take(5).toList();
+      _suggestionError = _service.lastErrorMessage;
       _isLoading = false;
     });
   }
@@ -84,7 +86,7 @@ class _LocationPickerSheetState extends State<LocationPickerSheet> {
       if (_isWithinServiceArea(latLng.lat, latLng.lng)) {
         widget.locationStore.setManualLocation(
           AppLocation(
-            label: suggestion.mainText,
+            label: _formatLocationLabel(suggestion),
             lat: latLng.lat,
             lng: latLng.lng,
             source: AppLocationSource.manual,
@@ -113,6 +115,32 @@ class _LocationPickerSheetState extends State<LocationPickerSheet> {
     setState(() {
       _isResolving = false;
     });
+  }
+
+  String _formatLocationLabel(PlaceSuggestion suggestion) {
+    final secondary = suggestion.secondaryText.trim();
+    if (secondary.isNotEmpty) {
+      final parts = secondary
+          .split(',')
+          .map((value) => value.trim())
+          .where((value) => value.isNotEmpty)
+          .toList();
+      if (parts.isNotEmpty) {
+        final first = parts.first;
+        if (first.contains('-')) {
+          final split = first
+              .split('-')
+              .map((value) => value.trim())
+              .where((value) => value.isNotEmpty)
+              .toList();
+          if (split.length >= 2) {
+            return '${split.first} ${split.sublist(1).join('-')}';
+          }
+        }
+        return first;
+      }
+    }
+    return suggestion.mainText.trim();
   }
 
   @override
@@ -223,6 +251,15 @@ class _LocationPickerSheetState extends State<LocationPickerSheet> {
                 child: CircularProgressIndicator(
                   color: MingaTheme.accentGreen,
                 ),
+              )
+            else if (_suggestionError != null &&
+                _controller.text.trim().isNotEmpty)
+              Text(
+                _suggestionError!,
+                style: MingaTheme.bodySmall.copyWith(
+                  color: MingaTheme.textSubtle,
+                ),
+                textAlign: TextAlign.center,
               )
             else if (_suggestions.isEmpty)
               Text(
