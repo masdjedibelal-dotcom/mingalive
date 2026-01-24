@@ -319,13 +319,13 @@ class PlaceRepository {
         var places = await _fetchPlacesByIds(spotPoolIds);
         places = await _attachFavoritesCounts(places);
         final ordered = _orderByIdList(places, spotPoolIds);
-        final withRuntime = await _applyRuntimeSorting(
+        var withRuntime = await _applyRuntimeSorting(
           ordered,
           collab,
         );
         final limit = collab.limit;
         if (limit > 0 && withRuntime.length > limit) {
-          return withRuntime.take(limit).toList();
+          withRuntime = withRuntime.take(limit).toList();
         }
         return withRuntime;
       }
@@ -372,6 +372,10 @@ class PlaceRepository {
           if (reviewComparison != 0) return reviewComparison;
           return a.name.compareTo(b.name);
         });
+      }
+
+      if (collab.requiresRuntime || collab.runtimeFilters.isNotEmpty) {
+        places = await _applyRuntimeSorting(places, collab);
       }
 
       final limit = collab.limit;
@@ -451,65 +455,418 @@ class PlaceRepository {
     CollabDefinition collab,
   ) async {
     if (places.isEmpty) return places;
-    final filters = collab.runtimeFilters;
-    final applyDistance = filters.contains('nearby_optional');
-    final applyOpenNow = filters.contains('open_now_optional');
-    final applyLate = filters.contains('after_22_preferred');
+    if (!collab.requiresRuntime && collab.runtimeFilters.isEmpty) {
+      return places;
+    }
 
-    var result = places;
-    if (applyDistance) {
+    final config = _runtimeConfigFor(collab);
+    var result = List<Place>.from(places);
+
+    result = _applyIntentFilter(result, config);
+
+    final shouldComputeDistance =
+        config.applyDistance || config.radiusStepsKm.isNotEmpty;
+    if (shouldComputeDistance) {
       result = await _withDistances(result);
     }
 
-    final indexMap = <String, int>{
-      for (var i = 0; i < result.length; i++) result[i].id: i,
-    };
+    final targetCount = _runtimeTargetCount(collab);
+    if (config.radiusStepsKm.isNotEmpty) {
+      result = _applyRadiusSteps(result, config.radiusStepsKm, targetCount);
+    }
+
+    final preferOpenNow =
+        config.openNowOptional && _isWithinPreferredTime(config.timePrefRanges);
+    if (config.openNowRequired || preferOpenNow) {
+      result = _applyOpenNowFilter(
+        result,
+        targetCount,
+        required: config.openNowRequired,
+        optional: preferOpenNow,
+      );
+    }
+
+    if (config.reviewGateSteps.isNotEmpty) {
+      result = _applyReviewGate(result, config.reviewGateSteps, targetCount);
+    }
+
+    final meanRating = _computeMeanRating(result);
+    final scoreM = config.scoreM;
 
     result.sort((a, b) {
-      if (applyOpenNow) {
+      if (config.openNowRequired || preferOpenNow) {
         final aOpen = _isOpenNow(a) ? 1 : 0;
         final bOpen = _isOpenNow(b) ? 1 : 0;
         if (aOpen != bOpen) return bOpen.compareTo(aOpen);
       }
 
-      if (applyLate) {
+      if (config.after22Preferred) {
         final aLate = _isLateFriendly(a) ? 1 : 0;
         final bLate = _isLateFriendly(b) ? 1 : 0;
         if (aLate != bLate) return bLate.compareTo(aLate);
       }
 
-      if (applyDistance) {
+      if (config.distanceFirst) {
         final distanceCompare = compareByDistanceNullable(a, b);
         if (distanceCompare != 0) return distanceCompare;
       }
 
-      final rankingCompare = _compareByRanking(a, b, collab.ranking);
-      if (rankingCompare != 0) return rankingCompare;
+      final scoreCompare = _computeWeightedScore(b, meanRating, scoreM)
+          .compareTo(_computeWeightedScore(a, meanRating, scoreM));
+      if (scoreCompare != 0) return scoreCompare;
 
-      return (indexMap[a.id] ?? 0).compareTo(indexMap[b.id] ?? 0);
+      final distanceCompare = compareByDistanceNullable(a, b);
+      if (distanceCompare != 0) return distanceCompare;
+
+      final reviewCompare = b.ratingCount.compareTo(a.ratingCount);
+      if (reviewCompare != 0) return reviewCompare;
+
+      return a.name.compareTo(b.name);
     });
 
     return result;
   }
 
-  int _compareByRanking(Place a, Place b, List<String> ranking) {
-    for (final key in ranking) {
-      switch (key) {
-        case 'distance':
-          final distanceCompare = compareByDistanceNullable(a, b);
-          if (distanceCompare != 0) return distanceCompare;
-          break;
-        case 'rating':
-          final ratingCompare = b.rating.compareTo(a.rating);
-          if (ratingCompare != 0) return ratingCompare;
-          break;
-        case 'review_count':
-          final reviewCompare = b.ratingCount.compareTo(a.ratingCount);
-          if (reviewCompare != 0) return reviewCompare;
-          break;
+  _RuntimeConfig _runtimeConfigFor(CollabDefinition collab) {
+    final includeCategories = <String>[
+      ...collab.query.includeCategories,
+    ];
+    final excludeCategories = <String>[
+      ...collab.query.excludeCategories,
+    ];
+    final intentKinds = <String>[];
+    final radiusStepsKm = <double>[];
+    final reviewGateSteps = <int>[];
+    int? scoreM;
+    var openNowRequired = false;
+    var openNowOptional = false;
+    var after22Preferred = false;
+    var applyDistance = false;
+    var distanceFirst = false;
+    final timePrefRanges = <_TimeRange>[];
+
+    for (final raw in collab.runtimeFilters) {
+      final value = raw.trim();
+      if (value.isEmpty) continue;
+      if (value == 'nearby_optional') {
+        applyDistance = true;
+        continue;
+      }
+      if (value == 'open_now_optional') {
+        openNowOptional = true;
+        continue;
+      }
+      if (value == 'open_now_required') {
+        openNowRequired = true;
+        continue;
+      }
+      if (value == 'after_22_preferred') {
+        after22Preferred = true;
+        continue;
+      }
+      if (value == 'distance_first') {
+        distanceFirst = true;
+        continue;
+      }
+      if (value.startsWith('intent_kind:')) {
+        intentKinds.addAll(_splitTokenList(value));
+        continue;
+      }
+      if (value.startsWith('intent_categories:')) {
+        includeCategories.addAll(_splitTokenList(value));
+        continue;
+      }
+      if (value.startsWith('exclude_categories:')) {
+        excludeCategories.addAll(_splitTokenList(value));
+        continue;
+      }
+      if (value.startsWith('radius_steps_km:')) {
+        radiusStepsKm.addAll(_splitDoubleList(value));
+        continue;
+      }
+      if (value.startsWith('review_gate_steps:')) {
+        reviewGateSteps.addAll(_splitIntList(value));
+        continue;
+      }
+      if (value.startsWith('score_m:')) {
+        scoreM = int.tryParse(value.split(':').last.trim());
+        continue;
+      }
+      if (value.startsWith('time_pref:')) {
+        timePrefRanges.addAll(_splitTimeRanges(value));
+        continue;
       }
     }
-    return 0;
+
+    if (intentKinds.isEmpty) {
+      final inferred = _inferIntentKind(includeCategories);
+      if (inferred != null) {
+        intentKinds.add(inferred);
+      }
+    }
+    if (radiusStepsKm.isEmpty && applyDistance) {
+      radiusStepsKm.addAll(
+        _defaultRadiusSteps(intentKinds.isEmpty ? null : intentKinds.first),
+      );
+    }
+    if (reviewGateSteps.isEmpty) {
+      reviewGateSteps.addAll(
+        _defaultReviewGateSteps(
+          intentKinds.isEmpty ? null : intentKinds.first,
+          includeCategories,
+        ),
+      );
+    }
+    scoreM ??= reviewGateSteps.isNotEmpty ? reviewGateSteps.first : 50;
+
+    return _RuntimeConfig(
+      includeCategories: includeCategories,
+      excludeCategories: excludeCategories,
+      intentKinds: intentKinds,
+      radiusStepsKm: radiusStepsKm,
+      reviewGateSteps: reviewGateSteps,
+      openNowRequired: openNowRequired,
+      openNowOptional: openNowOptional,
+      after22Preferred: after22Preferred,
+      applyDistance: applyDistance,
+      distanceFirst: distanceFirst,
+      scoreM: scoreM,
+      timePrefRanges: timePrefRanges,
+    );
+  }
+
+  List<String> _splitTokenList(String value) {
+    final raw = value.split(':').skip(1).join(':');
+    return raw
+        .split(RegExp(r'[|,]'))
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .toList();
+  }
+
+  List<double> _splitDoubleList(String value) {
+    final raw = value.split(':').skip(1).join(':');
+    return raw
+        .split(',')
+        .map((item) => double.tryParse(item.trim()))
+        .whereType<double>()
+        .toList();
+  }
+
+  List<int> _splitIntList(String value) {
+    final raw = value.split(':').skip(1).join(':');
+    return raw
+        .split(',')
+        .map((item) => int.tryParse(item.trim()))
+        .whereType<int>()
+        .toList();
+  }
+
+  List<_TimeRange> _splitTimeRanges(String value) {
+    final raw = value.split(':').skip(1).join(':');
+    return raw
+        .split(',')
+        .map((part) => part.trim())
+        .where((part) => part.isNotEmpty)
+        .map((part) {
+          final pieces = part.split('-');
+          if (pieces.length != 2) return null;
+          final start = int.tryParse(pieces[0].trim());
+          final end = int.tryParse(pieces[1].trim());
+          if (start == null || end == null) return null;
+          return _TimeRange(start: start, end: end);
+        })
+        .whereType<_TimeRange>()
+        .toList();
+  }
+
+  String? _inferIntentKind(List<String> categories) {
+    final lower = categories.map((value) => value.toLowerCase()).toList();
+    if (lower.any((value) =>
+        value.contains('bar') ||
+        value.contains('pizza') ||
+        value.contains('cafe') ||
+        value.contains('café') ||
+        value.contains('restaurant') ||
+        value.contains('food') ||
+        value.contains('essen') ||
+        value.contains('drink'))) {
+      return 'food';
+    }
+    if (lower.any((value) =>
+        value.contains('museum') ||
+        value.contains('sight') ||
+        value.contains('sehens') ||
+        value.contains('aktiv') ||
+        value.contains('park') ||
+        value.contains('natur'))) {
+      return 'sight';
+    }
+    return null;
+  }
+
+  List<double> _defaultRadiusSteps(String? intentKind) {
+    if (intentKind == 'food') {
+      return [2, 4, 7];
+    }
+    if (intentKind == 'sight') {
+      return [4, 7];
+    }
+    return [3, 5, 8];
+  }
+
+  List<int> _defaultReviewGateSteps(
+    String? intentKind,
+    List<String> categories,
+  ) {
+    final lower = categories.map((value) => value.toLowerCase()).toList();
+    if (lower.any((value) =>
+        value.contains('fast') ||
+        value.contains('burger') ||
+        value.contains('döner') ||
+        value.contains('imbiss') ||
+        value.contains('street'))) {
+      return [30, 20];
+    }
+    if (intentKind == 'food') {
+      return [50, 30, 20];
+    }
+    if (intentKind == 'sight') {
+      return [100, 50, 20];
+    }
+    return [50, 30, 20];
+  }
+
+  int _runtimeTargetCount(CollabDefinition collab) {
+    final limit = collab.limit > 0 ? collab.limit : 0;
+    if (limit > 0) return min(limit, 20);
+    return 12;
+  }
+
+  List<Place> _applyIntentFilter(
+    List<Place> places,
+    _RuntimeConfig config,
+  ) {
+    final hasKindFilter = config.intentKinds.isNotEmpty;
+    if (!hasKindFilter &&
+        config.includeCategories.isEmpty &&
+        config.excludeCategories.isEmpty) {
+      return places;
+    }
+    final include = config.includeCategories
+        .map((value) => value.toLowerCase())
+        .toList();
+    final exclude = config.excludeCategories
+        .map((value) => value.toLowerCase())
+        .toList();
+    return places.where((place) {
+      if (hasKindFilter) {
+        final kind = place.kind?.toLowerCase().trim() ?? '';
+        if (kind.isEmpty || !config.intentKinds.contains(kind)) {
+          return false;
+        }
+      }
+      final category = place.category.toLowerCase();
+      if (include.isNotEmpty &&
+          !include.any((value) => category.contains(value))) {
+        return false;
+      }
+      if (exclude.isNotEmpty &&
+          exclude.any((value) => category.contains(value))) {
+        return false;
+      }
+      return true;
+    }).toList();
+  }
+
+  List<Place> _applyRadiusSteps(
+    List<Place> places,
+    List<double> stepsKm,
+    int targetCount,
+  ) {
+    final withDistance =
+        places.where((place) => place.distanceKm != null).toList();
+    if (withDistance.isEmpty) return places;
+    var last = <Place>[];
+    for (final radius in stepsKm) {
+      final filtered = withDistance
+          .where((place) => (place.distanceKm ?? double.infinity) <= radius)
+          .toList();
+      if (filtered.isNotEmpty) {
+        last = filtered;
+      }
+      if (filtered.length >= targetCount) {
+        return filtered;
+      }
+    }
+    return last.isNotEmpty ? last : withDistance;
+  }
+
+  List<Place> _applyOpenNowFilter(
+    List<Place> places,
+    int targetCount, {
+    required bool required,
+    required bool optional,
+  }) {
+    final open = places.where(_isOpenNow).toList();
+    if (required) {
+      return open;
+    }
+    if (!optional) return places;
+    if (open.length >= targetCount) {
+      return open;
+    }
+    final closed = places.where((place) => !_isOpenNow(place)).toList();
+    return [...open, ...closed];
+  }
+
+  List<Place> _applyReviewGate(
+    List<Place> places,
+    List<int> steps,
+    int targetCount,
+  ) {
+    var last = <Place>[];
+    for (final minReviews in steps) {
+      final filtered =
+          places.where((place) => place.ratingCount >= minReviews).toList();
+      if (filtered.isNotEmpty) {
+        last = filtered;
+      }
+      if (filtered.length >= targetCount) {
+        return filtered;
+      }
+    }
+    return last.isNotEmpty ? last : places;
+  }
+
+  double _computeMeanRating(List<Place> places) {
+    var sum = 0.0;
+    var count = 0;
+    for (final place in places) {
+      if (place.rating > 0) {
+        sum += place.rating;
+        count += 1;
+      }
+    }
+    if (count == 0) return 0;
+    return sum / count;
+  }
+
+  double _computeWeightedScore(Place place, double mean, int m) {
+    final v = place.ratingCount;
+    final r = place.rating;
+    if (v <= 0 || r <= 0) return double.negativeInfinity;
+    final weight = v / (v + m);
+    return (weight * r) + ((1 - weight) * mean);
+  }
+
+  bool _isWithinPreferredTime(List<_TimeRange> ranges) {
+    if (ranges.isEmpty) return true;
+    final hour = DateTime.now().hour;
+    for (final range in ranges) {
+      if (range.contains(hour)) return true;
+    }
+    return false;
   }
 
   bool _isOpenNow(Place place) {
@@ -1108,4 +1465,48 @@ class _DistanceEnrichmentResult {
     required this.withDistance,
     required this.missingCoords,
   });
+}
+
+class _RuntimeConfig {
+  final List<String> includeCategories;
+  final List<String> excludeCategories;
+  final List<String> intentKinds;
+  final List<double> radiusStepsKm;
+  final List<int> reviewGateSteps;
+  final bool openNowRequired;
+  final bool openNowOptional;
+  final bool after22Preferred;
+  final bool applyDistance;
+  final bool distanceFirst;
+  final int scoreM;
+  final List<_TimeRange> timePrefRanges;
+
+  const _RuntimeConfig({
+    required this.includeCategories,
+    required this.excludeCategories,
+    required this.intentKinds,
+    required this.radiusStepsKm,
+    required this.reviewGateSteps,
+    required this.openNowRequired,
+    required this.openNowOptional,
+    required this.after22Preferred,
+    required this.applyDistance,
+    required this.distanceFirst,
+    required this.scoreM,
+    required this.timePrefRanges,
+  });
+}
+
+class _TimeRange {
+  final int start;
+  final int end;
+
+  const _TimeRange({required this.start, required this.end});
+
+  bool contains(int hour) {
+    if (start <= end) {
+      return hour >= start && hour <= end;
+    }
+    return hour >= start || hour <= end;
+  }
 }

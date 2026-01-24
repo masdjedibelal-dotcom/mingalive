@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/app_location.dart';
 
 class LatLng {
@@ -15,6 +16,9 @@ class LocationService {
   static const String _geocodeBaseUrl =
       'https://maps.googleapis.com/maps/api/geocode/json';
   final String _apiKey = 'AIzaSyAFKjeD3q01MzDBWdubuhtFRhi3u4QbCfs';
+  static const String _keyLat = 'location_lat';
+  static const String _keyLng = 'location_lng';
+  static const String _keyManual = 'location_manual';
 
   Future<AppLocation?> getCurrentLocation() async {
     final hasPermission = await _hasLocationPermission();
@@ -46,6 +50,12 @@ class LocationService {
   }
 
   Future<LatLng> getOriginOrFallback() async {
+    final manual = await _readManualOrigin();
+    if (manual != null) {
+      debugPrint('ORIGIN: manual');
+      return manual;
+    }
+
     final hasPermission = await _hasLocationPermission();
     if (hasPermission) {
       final serviceEnabled = await Geolocator.isLocationServiceEnabled();
@@ -64,6 +74,20 @@ class LocationService {
 
     debugPrint('ORIGIN: fallback');
     return const LatLng(48.137154, 11.576124);
+  }
+
+  Future<LatLng?> _readManualOrigin() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final isManual = prefs.getBool(_keyManual) ?? false;
+      if (!isManual) return null;
+      final lat = prefs.getDouble(_keyLat);
+      final lng = prefs.getDouble(_keyLng);
+      if (lat == null || lng == null) return null;
+      return LatLng(lat, lng);
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<bool> _hasLocationPermission() async {

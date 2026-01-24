@@ -136,10 +136,6 @@ class PlaceListTile extends StatelessWidget {
     if (category.isNotEmpty) {
       parts.add(category);
     }
-    final kind = place.kind?.trim() ?? '';
-    if (kind.isNotEmpty && !parts.contains(kind)) {
-      parts.add(kind);
-    }
     if (parts.isEmpty) return '';
     return parts.join(' · ');
   }

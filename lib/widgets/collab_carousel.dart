@@ -7,6 +7,7 @@ class CollabCarousel extends StatelessWidget {
   final bool isLoading;
   final String emptyText;
   final VoidCallback onSeeAll;
+  final bool showSeeAll;
   final int itemCount;
   final IndexedWidgetBuilder itemBuilder;
 
@@ -16,6 +17,7 @@ class CollabCarousel extends StatelessWidget {
     required this.isLoading,
     required this.emptyText,
     required this.onSeeAll,
+    this.showSeeAll = true,
     required this.itemCount,
     required this.itemBuilder,
   });
@@ -36,22 +38,23 @@ class CollabCarousel extends StatelessWidget {
                 ),
               ),
             ),
-            InkWell(
-              onTap: onSeeAll,
-              borderRadius: BorderRadius.circular(tokens.radius.sm),
-              splashColor: Colors.transparent,
-              highlightColor: Colors.transparent,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 2),
-                child: Text(
-                  'Alle ansehen',
-                  style: tokens.type.body.copyWith(
-                    color: tokens.colors.textSecondary,
-                    fontWeight: FontWeight.w600,
+            if (showSeeAll)
+              InkWell(
+                onTap: onSeeAll,
+                borderRadius: BorderRadius.circular(tokens.radius.sm),
+                splashColor: Colors.transparent,
+                highlightColor: Colors.transparent,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Text(
+                    'Alle ansehen',
+                    style: tokens.type.body.copyWith(
+                      color: tokens.colors.textSecondary,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ),
-            ),
           ],
         ),
         SizedBox(height: tokens.space.s12),

@@ -73,9 +73,11 @@ class PlaceGrid extends StatelessWidget {
                     borderRadius: BorderRadius.vertical(
                       top: Radius.circular(tokens.radius.md),
                     ),
-                    child: PlaceImage(
-                      imageUrl: place.imageUrl,
-                      fit: BoxFit.cover,
+                    child: SizedBox.expand(
+                      child: PlaceImage(
+                        imageUrl: place.imageUrl,
+                        fit: BoxFit.cover,
+                      ),
                     ),
                   ),
                 ),

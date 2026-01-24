@@ -174,7 +174,7 @@ class _AddToCollabSheetState extends State<_AddToCollabSheet> {
                       child: GlassButton(
                         variant: GlassButtonVariant.secondary,
                         onPressed: _showCreateCollabDialog,
-                        label: 'Create collab',
+                        label: 'Collab erstellen',
                       ),
                     ),
                   ],
@@ -292,7 +292,7 @@ class _AddToCollabSheetState extends State<_AddToCollabSheet> {
               child: GlassButton(
                 variant: GlassButtonVariant.secondary,
                 onPressed: _showCreateCollabDialog,
-                label: 'Create collab',
+                label: 'Collab erstellen',
               ),
             ),
           ],

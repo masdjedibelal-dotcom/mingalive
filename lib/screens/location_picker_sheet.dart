@@ -145,186 +145,197 @@ class _LocationPickerSheetState extends State<LocationPickerSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final sheetHeight = MediaQuery.of(context).size.height * 0.85;
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
     return SafeArea(
       top: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 36,
-              height: 4,
-              margin: const EdgeInsets.only(bottom: 14),
-              decoration: BoxDecoration(
-                color: MingaTheme.borderStrong,
-                borderRadius: BorderRadius.circular(MingaTheme.radiusSm),
+      child: SizedBox(
+        height: sheetHeight,
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(20, 8, 20, 24 + bottomInset),
+          child: Column(
+            mainAxisSize: MainAxisSize.max,
+            children: [
+              Container(
+                width: 36,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 14),
+                decoration: BoxDecoration(
+                  color: MingaTheme.borderStrong,
+                  borderRadius: BorderRadius.circular(MingaTheme.radiusSm),
+                ),
               ),
-            ),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'Standort auswählen',
-                    style: MingaTheme.titleLarge.copyWith(
-                      color: MingaTheme.textPrimary,
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Standort auswählen',
+                      style: MingaTheme.titleLarge.copyWith(
+                        color: MingaTheme.textPrimary,
+                      ),
                     ),
                   ),
-                ),
-                InkWell(
-                  onTap: () => Navigator.of(context).pop(),
-                  borderRadius: BorderRadius.circular(18),
-                  child: Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: MingaTheme.glassOverlayXXSoft,
-                      shape: BoxShape.circle,
+                  InkWell(
+                    onTap: () => Navigator.of(context).pop(),
+                    borderRadius: BorderRadius.circular(18),
+                    child: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: MingaTheme.glassOverlayXXSoft,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        Icons.close,
+                        size: 18,
+                        color: MingaTheme.textSecondary,
+                      ),
                     ),
-                    child: Icon(
-                      Icons.close,
-                      size: 18,
-                      color: MingaTheme.textSecondary,
-                    ),
                   ),
-                ),
-              ],
-            ),
-            SizedBox(height: 14),
-            Container(
-              decoration: BoxDecoration(
-                color: MingaTheme.glassOverlayXXSoft,
-                borderRadius: BorderRadius.circular(MingaTheme.radiusMd),
+                ],
               ),
-              child: TextField(
-                controller: _controller,
-                focusNode: _searchFocus,
-                onChanged: _onChanged,
-                style: MingaTheme.body,
-                decoration: InputDecoration(
-                  hintText: 'Ort, Stadtteil oder Straße suchen',
-                  hintStyle: MingaTheme.bodySmall.copyWith(
-                    color: MingaTheme.textSubtle,
-                  ),
-                  prefixIcon:
-                      Icon(Icons.search, color: MingaTheme.textSecondary),
-                  filled: true,
-                  fillColor: MingaTheme.transparent,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(MingaTheme.radiusMd),
-                    borderSide: BorderSide.none,
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(MingaTheme.radiusMd),
-                    borderSide: BorderSide.none,
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(MingaTheme.radiusMd),
-                    borderSide: BorderSide.none,
-                  ),
+              SizedBox(height: 14),
+              Container(
+                decoration: BoxDecoration(
+                  color: MingaTheme.glassOverlayXXSoft,
+                  borderRadius: BorderRadius.circular(MingaTheme.radiusMd),
                 ),
-              ),
-            ),
-            SizedBox(height: 14),
-            _buildActionRow(
-              icon: Icons.my_location,
-              label: 'Aktuellen Standort verwenden',
-              accent: true,
-              onTap: _isResolving
-                  ? null
-                  : () async {
-                      await widget.locationStore.useMyLocation();
-                      if (mounted) {
-                        Navigator.of(context).pop();
-                      }
-                    },
-              trailing: Icon(
-                Icons.check,
-                size: 16,
-                color: MingaTheme.accentGreen,
-              ),
-            ),
-            SizedBox(height: 8),
-            if (_isLoading)
-              Padding(
-                padding: EdgeInsets.symmetric(vertical: 12),
-                child: CircularProgressIndicator(
-                  color: MingaTheme.accentGreen,
-                ),
-              )
-            else if (_suggestionError != null &&
-                _controller.text.trim().isNotEmpty)
-              Text(
-                _suggestionError!,
-                style: MingaTheme.bodySmall.copyWith(
-                  color: MingaTheme.textSubtle,
-                ),
-                textAlign: TextAlign.center,
-              )
-            else if (_suggestions.isEmpty)
-              Text(
-                'Keine Vorschläge',
-                style: MingaTheme.bodySmall.copyWith(
-                  color: MingaTheme.textSubtle,
-                ),
-              )
-            else
-              ListView.separated(
-                shrinkWrap: true,
-                itemCount: _suggestions.length,
-                separatorBuilder: (_, __) =>
-                    Divider(color: MingaTheme.borderSubtle, height: 1),
-                itemBuilder: (context, index) {
-                  final suggestion = _suggestions[index];
-                  return ListTile(
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-                    dense: true,
-                    visualDensity: VisualDensity.compact,
-                    onTap: _isResolving
-                        ? null
-                        : () => _selectSuggestion(suggestion),
-                    leading: Icon(
-                      Icons.place_outlined,
-                      size: 18,
+                child: TextField(
+                  controller: _controller,
+                  focusNode: _searchFocus,
+                  onChanged: _onChanged,
+                  style: MingaTheme.body,
+                  decoration: InputDecoration(
+                    hintText: 'Ort, Stadtteil oder Straße suchen',
+                    hintStyle: MingaTheme.bodySmall.copyWith(
                       color: MingaTheme.textSubtle,
                     ),
-                    title: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          suggestion.mainText,
-                          style: MingaTheme.body.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        if (suggestion.secondaryText.isNotEmpty)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 2),
-                            child: Text(
-                              suggestion.secondaryText,
-                              style: MingaTheme.bodySmall.copyWith(
-                                color: MingaTheme.textSubtle,
-                              ),
-                            ),
-                          ),
-                      ],
+                    prefixIcon:
+                        Icon(Icons.search, color: MingaTheme.textSecondary),
+                    filled: true,
+                    fillColor: MingaTheme.transparent,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(MingaTheme.radiusMd),
+                      borderSide: BorderSide.none,
                     ),
-                    trailing: _isResolving
-                        ? SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: MingaTheme.accentGreen,
-                            ),
-                          )
-                        : null,
-                  );
-                },
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(MingaTheme.radiusMd),
+                      borderSide: BorderSide.none,
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(MingaTheme.radiusMd),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                ),
               ),
-          ],
+              SizedBox(height: 14),
+              _buildActionRow(
+                icon: Icons.my_location,
+                label: 'Aktuellen Standort verwenden',
+                accent: true,
+                onTap: _isResolving
+                    ? null
+                    : () async {
+                        await widget.locationStore.useMyLocation();
+                        if (mounted) {
+                          Navigator.of(context).pop();
+                        }
+                      },
+                trailing: Icon(
+                  Icons.check,
+                  size: 16,
+                  color: MingaTheme.accentGreen,
+                ),
+              ),
+              SizedBox(height: 8),
+              Expanded(child: _buildSuggestionsBody()),
+            ],
+          ),
         ),
       ),
+    );
+  }
+
+  Widget _buildSuggestionsBody() {
+    if (_isLoading) {
+      return Center(
+        child: CircularProgressIndicator(
+          color: MingaTheme.accentGreen,
+        ),
+      );
+    }
+    if (_suggestionError != null && _controller.text.trim().isNotEmpty) {
+      return Center(
+        child: Text(
+          _suggestionError!,
+          style: MingaTheme.bodySmall.copyWith(
+            color: MingaTheme.textSubtle,
+          ),
+          textAlign: TextAlign.center,
+        ),
+      );
+    }
+    if (_suggestions.isEmpty) {
+      return Center(
+        child: Text(
+          'Keine Vorschläge',
+          style: MingaTheme.bodySmall.copyWith(
+            color: MingaTheme.textSubtle,
+          ),
+        ),
+      );
+    }
+    return ListView.separated(
+      itemCount: _suggestions.length,
+      separatorBuilder: (_, __) =>
+          Divider(color: MingaTheme.borderSubtle, height: 1),
+      itemBuilder: (context, index) {
+        final suggestion = _suggestions[index];
+        return ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+          dense: true,
+          visualDensity: VisualDensity.compact,
+          onTap:
+              _isResolving ? null : () => _selectSuggestion(suggestion),
+          leading: Icon(
+            Icons.place_outlined,
+            size: 18,
+            color: MingaTheme.textSubtle,
+          ),
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                suggestion.mainText,
+                style: MingaTheme.body.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              if (suggestion.secondaryText.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    suggestion.secondaryText,
+                    style: MingaTheme.bodySmall.copyWith(
+                      color: MingaTheme.textSubtle,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          trailing: _isResolving
+              ? SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: MingaTheme.accentGreen,
+                  ),
+                )
+              : null,
+        );
+      },
     );
   }
 

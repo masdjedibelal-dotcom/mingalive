@@ -17,12 +17,14 @@ import '../services/supabase_profile_repository.dart';
 import '../services/supabase_gate.dart';
 import '../services/supabase_chat_repository.dart';
 import '../services/activity_service.dart';
+import '../services/auth_service.dart';
 import '../widgets/place_image.dart';
 import '../widgets/collab_card.dart';
 import '../widgets/collab_carousel.dart';
 import '../state/location_store.dart';
 import '../utils/distance_utils.dart';
 import '../utils/bottom_nav_padding.dart';
+import '../data/system_collabs.dart';
 import 'location_picker_sheet.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -46,7 +48,11 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isHypeLoading = false;
   bool _isStreamPreviewLoading = false;
   bool _isCollabLoading = true;
+  bool _isFollowingLoading = true;
   List<Collab> _publicCollabs = [];
+  List<Collab> _savedCollabs = [];
+  List<CollabDefinition> _systemCollabs = [];
+  bool _isSystemCollabsLoading = true;
   final Map<String, int> _collabSaveCounts = {};
   final Map<String, UserProfile> _creatorProfiles = {};
   final Map<String, List<String>> _fallbackMediaByCollabId = {};
@@ -69,6 +75,8 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadHypePlaces();
     _checkActivityNotifications();
     _loadDiscoveryCollabs();
+    _loadFollowingCollabs();
+    _loadSystemCollabs();
     _locationStore.addListener(_handleLocationChange);
   }
 
@@ -392,6 +400,62 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _loadFollowingCollabs() async {
+    try {
+      if (!SupabaseGate.isEnabled) {
+        if (mounted) {
+          setState(() {
+            _savedCollabs = [];
+            _isFollowingLoading = false;
+          });
+        }
+        return;
+      }
+
+      final currentUser = AuthService.instance.currentUser;
+      if (currentUser == null) {
+        if (mounted) {
+          setState(() {
+            _savedCollabs = [];
+            _isFollowingLoading = false;
+          });
+        }
+        return;
+      }
+
+      final collabs =
+          await _collabsRepository.fetchSavedCollabs(userId: currentUser.id);
+
+      final userIds = collabs.map((list) => list.ownerId).toSet();
+      final profiles = await Future.wait(
+        userIds.map((id) => _profileRepository.fetchUserProfile(id)),
+      );
+
+      for (final profile in profiles) {
+        if (profile != null) {
+          _creatorProfiles[profile.id] = profile;
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _savedCollabs = collabs;
+          _isFollowingLoading = false;
+        });
+      }
+      _loadFallbackMediaForCollabs(collabs);
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ HomeScreen: Failed to load following collabs: $e');
+      }
+      if (mounted) {
+        setState(() {
+          _isFollowingLoading = false;
+        });
+      }
+    }
+  }
+
   Future<void> _loadFallbackMediaForCollabs(
     List<Collab> collabs,
   ) async {
@@ -405,6 +469,59 @@ class _HomeScreenState extends State<HomeScreen> {
           collabId: collab.id,
         );
         if (placeIds.isEmpty) continue;
+        final fetched = await _repository.fetchPlacesByIds(placeIds);
+        final byId = {
+          for (final place in fetched) place.id: place,
+        };
+        final places = placeIds.map((id) => byId[id]).whereType<Place>().toList();
+        final urls = _extractPlaceImages(places);
+        if (!mounted || urls.isEmpty) continue;
+        setState(() {
+          _fallbackMediaByCollabId[collab.id] = urls;
+        });
+      } catch (e) {
+        if (kDebugMode) {
+          debugPrint(
+            '⚠️ HomeScreen: fallback media failed for ${collab.id}: $e',
+          );
+        }
+      }
+    }
+  }
+
+  Future<void> _loadSystemCollabs() async {
+    try {
+      final collabs = await SystemCollabsStore.load();
+      if (mounted) {
+        setState(() {
+          _systemCollabs = collabs;
+          _isSystemCollabsLoading = false;
+        });
+      }
+      _loadFallbackMediaForSystemCollabDefs(collabs);
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ HomeScreen: Failed to load system collabs: $e');
+      }
+      if (mounted) {
+        setState(() {
+          _systemCollabs = [];
+          _isSystemCollabsLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _loadFallbackMediaForSystemCollabDefs(
+    List<CollabDefinition> collabs,
+  ) async {
+    if (!SupabaseGate.isEnabled || collabs.isEmpty) return;
+    for (final collab in collabs) {
+      final existing = _fallbackMediaByCollabId[collab.id];
+      if (existing != null && existing.isNotEmpty) continue;
+      final placeIds = collab.spotPoolIds;
+      if (placeIds.isEmpty) continue;
+      try {
         final fetched = await _repository.fetchPlacesByIds(placeIds);
         final byId = {
           for (final place in fetched) place.id: place,
@@ -458,12 +575,14 @@ class _HomeScreenState extends State<HomeScreen> {
     required String title,
     required List<Collab> collabs,
     required CollabsExploreFilter filter,
+    bool? isLoading,
+    String? emptyText,
   }) {
     final limited = collabs.take(6).toList();
     return CollabCarousel(
       title: title,
-      isLoading: _isCollabLoading,
-      emptyText: 'Noch keine Collabs verfügbar',
+      isLoading: isLoading ?? _isCollabLoading,
+      emptyText: emptyText ?? 'Noch keine Collabs verfügbar',
       onSeeAll: () {
         Navigator.of(context).push(
           MaterialPageRoute(
@@ -486,6 +605,72 @@ class _HomeScreenState extends State<HomeScreen> {
             right: index == limited.length - 1 ? 0 : 16,
           ),
           child: _buildCollabCard(collab, collabs: limited),
+        );
+      },
+    );
+  }
+
+  Widget _buildSystemCollabSection({
+    required String title,
+    required List<CollabDefinition> collabs,
+    bool isLoading = false,
+  }) {
+    final limited = collabs.take(6).toList();
+    return CollabCarousel(
+      title: title,
+      isLoading: isLoading,
+      emptyText: 'Noch keine Collabs verfügbar',
+      onSeeAll: () {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => CollabsExploreScreen(
+              initialFilter: CollabsExploreFilter.popular,
+            ),
+          ),
+        );
+      },
+      showSeeAll: true,
+      itemCount: limited.length,
+      itemBuilder: (context, index) {
+        final collab = limited[index];
+        return Padding(
+          padding: EdgeInsets.only(
+            right: index == limited.length - 1 ? 0 : 16,
+          ),
+          child: _buildSystemCollabCard(collab, collabs: limited),
+        );
+      },
+    );
+  }
+
+  Widget _buildSystemCollabCard(
+    CollabDefinition collab, {
+    required List<CollabDefinition> collabs,
+  }) {
+    final fallbackUrls = _fallbackMediaByCollabId[collab.id] ?? const [];
+    final mediaUrls = fallbackUrls;
+    final collabIds = collabs.map((item) => item.id).toList();
+    final initialIndex = collabIds.indexOf(collab.id);
+
+    return CollabCard(
+      title: collab.title,
+      username: collab.creatorName,
+      avatarUrl: collab.creatorAvatarUrl,
+      creatorId: collab.creatorId,
+      creatorBadge: null,
+      mediaUrls: mediaUrls,
+      imageUrl: mediaUrls.isNotEmpty ? mediaUrls.first : collab.heroImageUrl,
+      gradientKey: collab.gradientKey,
+      onCreatorTap: () {},
+      onTap: () {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => CollabDetailScreen(
+              collabId: collab.id,
+              collabIds: collabIds,
+              initialIndex: initialIndex < 0 ? 0 : initialIndex,
+            ),
+          ),
         );
       },
     );
@@ -577,6 +762,20 @@ class _HomeScreenState extends State<HomeScreen> {
                   _buildQuickIntroCard(),
                 ],
                 SizedBox(height: 28),
+                _buildSystemCollabSection(
+                  title: 'In deiner Nähe',
+                  collabs: _systemCollabs,
+                  isLoading: _isSystemCollabsLoading,
+                ),
+                SizedBox(height: 28),
+                _buildCollabSection(
+                  title: 'Following Collabs',
+                  collabs: _savedCollabs,
+                  filter: CollabsExploreFilter.following,
+                  isLoading: _isFollowingLoading,
+                  emptyText: 'Du folgst noch keinen Collabs.',
+                ),
+                SizedBox(height: 28),
                 _buildCollabSection(
                   title: 'Beliebte Collabs',
                   collabs: _popularCollabs,
@@ -654,6 +853,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void _openLocationSheet(BuildContext context, AppLocation location) {
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       backgroundColor: MingaTheme.transparent,
       builder: (context) {
         return SafeArea(

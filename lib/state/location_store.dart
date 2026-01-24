@@ -105,6 +105,53 @@ class LocationStore extends ChangeNotifier {
     } catch (_) {}
   }
 
+  Future<void> refreshFromStorage() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final isManual = prefs.getBool(_keyManual) ?? false;
+      if (isManual) {
+        final label = prefs.getString(_keyLabel);
+        final lat = prefs.getDouble(_keyLat);
+        final lng = prefs.getDouble(_keyLng);
+        if (label == null || lat == null || lng == null) return;
+        final next = AppLocation(
+          label: label,
+          lat: lat,
+          lng: lng,
+          source: AppLocationSource.manual,
+        );
+        final current = _currentLocation;
+        if (current == null ||
+            current.lat != next.lat ||
+            current.lng != next.lng ||
+            current.label != next.label ||
+            current.source != next.source) {
+          _manualOverride = true;
+          _currentLocation = next;
+          notifyListeners();
+        }
+        return;
+      }
+
+      if (_manualOverride) {
+        _manualOverride = false;
+        final gpsLocation = await _service.getCurrentLocation();
+        if (gpsLocation != null &&
+            _isWithinServiceArea(gpsLocation.lat, gpsLocation.lng)) {
+          _currentLocation = gpsLocation;
+        } else {
+          _currentLocation = const AppLocation(
+            label: 'München Zentrum',
+            lat: _centerLat,
+            lng: _centerLng,
+            source: AppLocationSource.fallback,
+          );
+        }
+        notifyListeners();
+      }
+    } catch (_) {}
+  }
+
   Future<void> _persistManualLocation(AppLocation location) async {
     try {
       final prefs = await SharedPreferences.getInstance();

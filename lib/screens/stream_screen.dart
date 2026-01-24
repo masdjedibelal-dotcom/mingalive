@@ -505,6 +505,9 @@ class StreamScreenState extends State<StreamScreen>
     final isVisible = TickerMode.of(context);
     if (isVisible == _wasVisible) return;
     _wasVisible = isVisible;
+    if (isVisible) {
+      _locationStore.refreshFromStorage();
+    }
   }
 
   /// Builds a single stream item with strict layout:
@@ -864,6 +867,9 @@ class _StreamChatPaneState extends State<StreamChatPane> {
   StreamSubscription<List<ChatMessage>>? _messagesSubscription;
   StreamSubscription<List<RoomMediaPost>>? _mediaSubscription;
   StreamSubscription<List<PresenceProfile>>? _presenceRosterSubscription;
+  final DraggableScrollableController _sheetController =
+      DraggableScrollableController();
+  bool _isSheetExpanded = false;
   List<ChatMessage> _messages = [];
   final List<ChatMessage> _systemMessages = [];
   List<RoomMediaPost> _mediaPosts = [];
@@ -939,6 +945,7 @@ class _StreamChatPaneState extends State<StreamChatPane> {
     _messagesSubscription?.cancel();
     _mediaSubscription?.cancel();
     _presenceRosterSubscription?.cancel();
+    _sheetController.dispose();
     if (SupabaseGate.isEnabled && _chatRepository is SupabaseChatRepository) {
       final roomId = widget.place.chatRoomId;
       final supabaseRepo = _chatRepository as SupabaseChatRepository;
@@ -946,6 +953,18 @@ class _StreamChatPaneState extends State<StreamChatPane> {
     }
     _reactionRefreshTimer?.cancel();
     super.dispose();
+  }
+
+  Future<void> _toggleChatSheet() async {
+    final target = _isSheetExpanded ? 0.2 : 0.92;
+    setState(() {
+      _isSheetExpanded = !_isSheetExpanded;
+    });
+    await _sheetController.animateTo(
+      target,
+      duration: const Duration(milliseconds: 240),
+      curve: Curves.easeOut,
+    );
   }
 
   @override
@@ -970,6 +989,7 @@ class _StreamChatPaneState extends State<StreamChatPane> {
           ),
         ),
         DraggableScrollableSheet(
+          controller: _sheetController,
           initialChildSize: 0.5,
           minChildSize: 0.2,
           maxChildSize: 0.92,
@@ -984,34 +1004,43 @@ class _StreamChatPaneState extends State<StreamChatPane> {
               child: Column(
                 children: [
                   SizedBox(height: tokens.space.s8),
-                  Container(
-                    width: tokens.space.s32,
-                    height: tokens.space.s4,
-                    decoration: BoxDecoration(
-                      color: tokens.colors.textMuted.withOpacity(0.5),
-                      borderRadius: BorderRadius.circular(tokens.radius.pill),
-                    ),
-                  ),
-                  Padding(
-                    padding: EdgeInsets.fromLTRB(
-                      tokens.space.s16,
-                      tokens.space.s12,
-                      tokens.space.s16,
-                      tokens.space.s8,
-                    ),
-                    child: Row(
+                  GestureDetector(
+                    onTap: _toggleChatSheet,
+                    behavior: HitTestBehavior.opaque,
+                    child: Column(
                       children: [
-                        Text(
-                          'Live-Chat',
-                          style: tokens.type.title.copyWith(
-                            color: tokens.colors.textPrimary,
+                        Container(
+                          width: tokens.space.s32,
+                          height: tokens.space.s4,
+                          decoration: BoxDecoration(
+                            color: tokens.colors.textMuted.withOpacity(0.5),
+                            borderRadius:
+                                BorderRadius.circular(tokens.radius.pill),
                           ),
                         ),
-                        const Spacer(),
-                        Text(
-                          '${displayMessages.length} Nachrichten',
-                          style: tokens.type.caption.copyWith(
-                            color: tokens.colors.textMuted,
+                        Padding(
+                          padding: EdgeInsets.fromLTRB(
+                            tokens.space.s16,
+                            tokens.space.s12,
+                            tokens.space.s16,
+                            tokens.space.s8,
+                          ),
+                          child: Row(
+                            children: [
+                              Text(
+                                'Live-Chat',
+                                style: tokens.type.title.copyWith(
+                                  color: tokens.colors.textPrimary,
+                                ),
+                              ),
+                              const Spacer(),
+                              Text(
+                                '${displayMessages.length} Nachrichten',
+                                style: tokens.type.caption.copyWith(
+                                  color: tokens.colors.textMuted,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ],

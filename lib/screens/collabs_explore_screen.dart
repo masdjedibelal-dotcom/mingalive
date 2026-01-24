@@ -5,7 +5,10 @@ import '../services/supabase_collabs_repository.dart';
 import '../services/supabase_profile_repository.dart';
 import '../services/supabase_gate.dart';
 import '../data/place_repository.dart';
+import '../data/system_collabs.dart';
 import '../widgets/collab_card.dart';
+import '../widgets/collab_carousel.dart';
+import '../models/collab.dart';
 import '../models/place.dart';
 import '../utils/bottom_nav_padding.dart';
 import 'collab_detail_screen.dart';
@@ -33,11 +36,13 @@ class _CollabsExploreScreenState extends State<CollabsExploreScreen> {
       SupabaseProfileRepository();
   final PlaceRepository _placeRepository = PlaceRepository();
   bool _isLoading = true;
+  bool _isSystemLoading = true;
   CollabsExploreFilter _activeFilter = CollabsExploreFilter.popular;
   final Map<String, int> _saveCounts = {};
   final Map<String, UserProfile> _creatorProfiles = {};
   List<Collab> _publicCollabs = [];
   List<Collab> _savedCollabs = [];
+  List<CollabDefinition> _systemCollabs = [];
   final Map<String, List<String>> _fallbackMediaByCollabId = {};
 
   @override
@@ -82,6 +87,7 @@ class _CollabsExploreScreenState extends State<CollabsExploreScreen> {
         _publicCollabs.map((collab) => collab.id).toList(),
       );
       _saveCounts.addAll(counts);
+      _systemCollabs = await SystemCollabsStore.load();
     } catch (_) {
       // keep defaults on error
     }
@@ -89,9 +95,11 @@ class _CollabsExploreScreenState extends State<CollabsExploreScreen> {
     if (mounted) {
       setState(() {
         _isLoading = false;
+        _isSystemLoading = false;
       });
     }
     await _loadFallbackMediaForCollabs();
+    await _loadFallbackMediaForSystemCollabs();
   }
 
   List<Collab> get _filteredCollabs {
@@ -146,6 +154,8 @@ class _CollabsExploreScreenState extends State<CollabsExploreScreen> {
       body: Column(
         children: [
           SizedBox(height: 8),
+          _buildSystemCollabSection(),
+          SizedBox(height: 12),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Row(
@@ -287,6 +297,77 @@ class _CollabsExploreScreenState extends State<CollabsExploreScreen> {
         ..clear()
         ..addAll(updated);
     });
+  }
+
+  Future<void> _loadFallbackMediaForSystemCollabs() async {
+    if (_systemCollabs.isEmpty) return;
+    final updated = Map<String, List<String>>.from(_fallbackMediaByCollabId);
+    for (final collab in _systemCollabs) {
+      if (updated.containsKey(collab.id)) continue;
+      final placeIds = collab.spotPoolIds;
+      if (placeIds.isEmpty) continue;
+      final places = await _placeRepository.fetchPlacesByIds(placeIds);
+      final ordered = _orderPlacesByIds(places, placeIds);
+      final urls = _extractPlaceImages(ordered);
+      if (urls.isNotEmpty) {
+        updated[collab.id] = urls;
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      _fallbackMediaByCollabId
+        ..clear()
+        ..addAll(updated);
+    });
+  }
+
+  Widget _buildSystemCollabSection() {
+    final items = _systemCollabs.take(8).toList();
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: CollabCarousel(
+        title: 'In deiner Nähe',
+        isLoading: _isSystemLoading,
+        emptyText: 'Noch keine Collabs verfügbar',
+        onSeeAll: () {},
+        showSeeAll: false,
+        itemCount: items.length,
+        itemBuilder: (context, index) {
+          final collab = items[index];
+          final fallbackUrls = _fallbackMediaByCollabId[collab.id] ?? const [];
+          final mediaUrls = fallbackUrls;
+          final collabIds = items.map((item) => item.id).toList();
+          final initialIndex = collabIds.indexOf(collab.id);
+          return Padding(
+            padding: EdgeInsets.only(
+              right: index == items.length - 1 ? 0 : 16,
+            ),
+            child: CollabCard(
+              title: collab.title,
+              username: collab.creatorName,
+              avatarUrl: collab.creatorAvatarUrl,
+              creatorId: collab.creatorId,
+              creatorBadge: null,
+              mediaUrls: mediaUrls,
+              imageUrl: mediaUrls.isNotEmpty ? mediaUrls.first : collab.heroImageUrl,
+              gradientKey: collab.gradientKey,
+              onCreatorTap: () {},
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) => CollabDetailScreen(
+                      collabId: collab.id,
+                      collabIds: collabIds,
+                      initialIndex: initialIndex < 0 ? 0 : initialIndex,
+                    ),
+                  ),
+                );
+              },
+            ),
+          );
+        },
+      ),
+    );
   }
 
   List<Place> _orderPlacesByIds(List<Place> places, List<String> ids) {

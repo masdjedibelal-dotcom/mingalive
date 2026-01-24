@@ -13,6 +13,7 @@ import '../data/place_repository.dart';
 import '../models/collab.dart';
 import '../models/place.dart';
 import '../services/auth_service.dart';
+import '../services/location_service.dart';
 import '../services/supabase_favorites_repository.dart';
 import '../services/supabase_gate.dart';
 import '../services/supabase_collabs_repository.dart';
@@ -27,6 +28,7 @@ import '../data/system_collabs.dart';
 import '../theme/app_theme_extensions.dart';
 import '../theme/app_tokens.dart';
 import '../utils/bottom_nav_padding.dart';
+import '../utils/distance_utils.dart';
 import 'add_spots_to_collab_sheet.dart';
 import 'detail_screen.dart';
 import 'main_shell.dart';
@@ -84,6 +86,9 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
       SupabaseCollabsRepository();
   final SupabaseProfileRepository _profileRepository =
       SupabaseProfileRepository();
+  final LocationService _locationService = LocationService();
+  final DistanceCache _distanceCache = DistanceCache();
+  Future<LatLng>? _originFuture;
   late final List<String> _collabIds;
   int _currentIndex = 0;
 
@@ -436,7 +441,12 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
           blurSigma: 18,
           overlayColor: MingaTheme.glassOverlay,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+            padding: EdgeInsets.fromLTRB(
+              20,
+              20,
+              20,
+              24 + bottomNavSafePadding(context),
+            ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -704,6 +714,14 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
   }
 
   Future<void> _loadCollabDataFor(String collabId) async {
+    final systemCollab = _findCollab(collabId);
+    if (systemCollab != null && systemCollab.requiresRuntime) {
+      // System collabs are not stored in the user collabs table.
+      return;
+    }
+    if (!_isUuid(collabId)) {
+      return;
+    }
     final collab = await _collabsRepository.fetchCollabById(collabId);
     if (!mounted || collab == null) return;
     setState(() {
@@ -743,6 +761,13 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
     final display = profile.displayName.trim();
     if (display.isNotEmpty) return display;
     return 'User';
+  }
+
+  bool _isUuid(String value) {
+    final regex = RegExp(
+      r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
+    );
+    return regex.hasMatch(value);
   }
 
   Future<void> _openEditCollab(String collabId, CollabDefinition collab) async {
@@ -1028,12 +1053,35 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
   Future<_CollabPlacesPayload> _fetchSupabasePlacesPayload(
     String collabId,
   ) async {
-    final places = await _fetchSupabaseCollabPlaces(collabId);
+    var places = await _fetchSupabaseCollabPlaces(collabId);
+    places = await _applyDistances(places);
     final notes =
         await _collabsRepository.fetchCollabPlaceNotes(collabId: collabId);
     _supabaseNotesByCollabId[collabId] = notes;
     _updateFallbackMedia(collabId, places);
     return _CollabPlacesPayload(places: places, notes: notes);
+  }
+
+  Future<LatLng> _getOrigin() {
+    return _originFuture ??= _locationService.getOriginOrFallback();
+  }
+
+  Future<List<Place>> _applyDistances(List<Place> places) async {
+    if (places.isEmpty) return places;
+    final origin = await _getOrigin();
+    return places.map((place) {
+      final distanceKm = _distanceCache.getOrCompute(
+        placeId: place.id,
+        userLat: origin.lat,
+        userLng: origin.lng,
+        placeLat: place.lat,
+        placeLng: place.lng,
+      );
+      if (distanceKm == null) {
+        return place.copyWith(clearDistanceKm: true);
+      }
+      return place.copyWith(distanceKm: distanceKm);
+    }).toList();
   }
 
   Future<void> _showAddSpotsSheet(String collabId) async {
@@ -1401,43 +1449,58 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
       _isTogglingFollowById[collabId] = true;
     });
 
-    if (_followedLists[collabId] != null) {
-      await _favoritesRepository.deleteFavoriteList(
-        listId: _followedLists[collabId]!.id,
+    try {
+      if (_followedLists[collabId] != null) {
+        await _favoritesRepository.deleteFavoriteList(
+          listId: _followedLists[collabId]!.id,
+        );
+        if (mounted) {
+          setState(() {
+            _followedLists[collabId] = null;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Sammlung entfernt'),
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+        return;
+      }
+
+      final list = await _favoritesRepository.ensureCollabList(
+        title: collab.title,
+        subtitle: collab.subtitle,
       );
+
       if (mounted) {
         setState(() {
-          _followedLists[collabId] = null;
-          _isTogglingFollowById[collabId] = false;
+          _followedLists[collabId] = list;
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Sammlung entfernt'),
-            duration: Duration(seconds: 2),
+            content: Text(
+              list == null ? 'Fehler beim Folgen' : 'Sammlung gespeichert',
+            ),
+            duration: const Duration(seconds: 2),
           ),
         );
       }
-      return;
-    }
-
-    final list = await _favoritesRepository.ensureCollabList(
-      title: collab.title,
-      subtitle: collab.subtitle,
-    );
-
-    if (mounted) {
-      setState(() {
-        _followedLists[collabId] = list;
-        _isTogglingFollowById[collabId] = false;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            list == null ? 'Fehler beim Folgen' : 'Sammlung gespeichert',
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Konnte Collab nicht folgen.'),
+            duration: const Duration(seconds: 2),
           ),
-          duration: const Duration(seconds: 2),
-        ),
-      );
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isTogglingFollowById[collabId] = false;
+        });
+      }
     }
   }
 }

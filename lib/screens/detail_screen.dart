@@ -7,13 +7,16 @@ import 'theme.dart';
 import '../models/place.dart';
 import '../models/chat_message.dart';
 import '../widgets/place_image.dart';
+import '../widgets/place_distance_text.dart';
 import '../widgets/add_to_collab_sheet.dart';
 import '../services/auth_service.dart';
 import '../services/chat_repository.dart';
 import '../services/supabase_chat_repository.dart';
 import '../services/supabase_gate.dart';
+import '../services/location_service.dart';
 import '../data/place_repository.dart';
 import '../utils/bottom_nav_padding.dart';
+import '../utils/distance_utils.dart';
 import 'main_shell.dart';
 import 'creator_profile_screen.dart';
 
@@ -47,6 +50,10 @@ class _DetailScreenState extends State<DetailScreen> {
   final ScrollController _chatScrollController = ScrollController(); // Separate controller for chat list
   final GlobalKey _chatSectionKey = GlobalKey();
   final PlaceRepository _placeRepository = PlaceRepository();
+  final LocationService _locationService = LocationService();
+  final DistanceCache _distanceCache = DistanceCache();
+  Future<LatLng>? _originFuture;
+  double? _distanceKm;
   bool _isFavorite = false;
   bool _isFavoriteLoading = false;
   String? _favoritePlaceId;
@@ -86,6 +93,7 @@ class _DetailScreenState extends State<DetailScreen> {
         _initializeChat();
       }
       _loadFavoriteStatus(_currentPlace!);
+      _loadDistanceForPlace(_currentPlace!);
     }
   }
 
@@ -97,6 +105,40 @@ class _DetailScreenState extends State<DetailScreen> {
       _initializeChat();
     }
     _loadFavoriteStatus(place);
+    _loadDistanceForPlace(place);
+  }
+
+  Future<void> _loadDistanceForPlace(Place place) async {
+    if (place.distanceKm != null) {
+      if (_distanceKm != place.distanceKm && mounted) {
+        setState(() {
+          _distanceKm = place.distanceKm;
+        });
+      }
+      return;
+    }
+    if (place.lat == null || place.lng == null) {
+      if (_distanceKm != null && mounted) {
+        setState(() {
+          _distanceKm = null;
+        });
+      }
+      return;
+    }
+    final origin = await (_originFuture ??= _locationService.getOriginOrFallback());
+    final distance = _distanceCache.getOrCompute(
+      placeId: place.id,
+      userLat: origin.lat,
+      userLng: origin.lng,
+      placeLat: place.lat,
+      placeLng: place.lng,
+    );
+    if (!mounted) return;
+    if (_distanceKm != distance) {
+      setState(() {
+        _distanceKm = distance;
+      });
+    }
   }
 
   /// Show dialog to add place to favorite list
@@ -707,6 +749,29 @@ class _DetailScreenState extends State<DetailScreen> {
                 ),
             ],
           ),
+        ),
+      );
+    }
+    final distanceKm = _distanceKm ?? place.distanceKm;
+    if (distanceKm != null) {
+      rows.add(
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              Icons.navigation,
+              size: 18,
+              color: MingaTheme.textSubtle,
+            ),
+            SizedBox(width: 10),
+            PlaceDistanceText(
+              distanceKm: distanceKm,
+              style: MingaTheme.body.copyWith(
+                color: MingaTheme.textSecondary,
+                height: 1.4,
+              ),
+            ),
+          ],
         ),
       );
     }

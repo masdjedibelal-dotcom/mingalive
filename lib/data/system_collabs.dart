@@ -32,6 +32,16 @@ class SystemCollabsStore {
           .map((value) => value.toString())
           .toList();
       final spotPoolIds = _extractSpotPoolIds(map);
+      final includeCategories = (map['include_categories'] as List? ?? [])
+          .map((value) => value.toString())
+          .toList();
+      final excludeCategories = (map['exclude_categories'] as List? ?? [])
+          .map((value) => value.toString())
+          .toList();
+      final minReviewCount = (map['min_review_count'] as num?)?.toInt() ?? 0;
+      final onlySocialEnabled = map['only_social_enabled'] == true;
+      final sort = map['sort']?.toString() ?? 'reviewCount';
+      final limit = (map['limit'] as num?)?.toInt();
 
       final gradientKey = gradientKeys[gradientIndex % gradientKeys.length];
       gradientIndex += 1;
@@ -46,8 +56,14 @@ class SystemCollabsStore {
           creatorAvatarUrl: null,
           heroType: 'gradient',
           gradientKey: gradientKey,
-          query: const CollabQuery(),
-          limit: spotPoolIds.length,
+          query: CollabQuery(
+            includeCategories: includeCategories,
+            excludeCategories: excludeCategories,
+            minReviewCount: minReviewCount,
+            onlySocialEnabled: onlySocialEnabled,
+            sort: sort,
+          ),
+          limit: limit ?? spotPoolIds.length,
           spotPoolIds: spotPoolIds,
           requiresRuntime: requiresRuntime,
           runtimeFilters: runtimeFilters,
