@@ -104,7 +104,6 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
   final Map<String, Map<String, String>> _localNotesByCollabId = {};
   final Map<String, Map<String, String>> _supabaseNotesByCollabId = {};
   final Set<String> _expandedNoteKeys = {};
-  final Set<String> _expandedDescriptionIds = {};
   bool _isSystemLoading = true;
   final Map<String, List<String>> _fallbackMediaByCollabId = {};
 
@@ -215,7 +214,6 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
         _collabDataById[collabId]?.ownerId ?? collab.creatorId;
     final isOwner = _isOwnerById(ownerId);
     final title = _titleOverrides[collabId] ?? collab.title;
-    final description = _descriptionOverrides[collabId] ?? collab.subtitle;
     final mediaItems = _mediaItemsById[collabId] ?? const [];
     final fallbackUrls = _fallbackMediaByCollabId[collabId] ?? const [];
 
@@ -252,29 +250,25 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
             left: 20,
             right: 20,
             bottom: 20,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        title,
-                        style: MingaTheme.titleLarge.copyWith(height: 1.2),
-                      ),
-                      SizedBox(height: 8),
-                      _buildCreatorRow(collab),
-                      SizedBox(height: 6),
-                      _buildDescriptionText(collabId, description),
-                    ],
-                  ),
+                Text(
+                  title,
+                  style: MingaTheme.titleLarge.copyWith(height: 1.2),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                 ),
-                SizedBox(width: 12),
-                isOwner
-                    ? _buildEditButton(collabId, collab)
-                    : _buildFollowButton(collabId),
+                SizedBox(height: 8),
+                _buildCreatorRow(collab),
+                SizedBox(height: 12),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: isOwner
+                      ? _buildEditButton(collabId, collab)
+                      : _buildFollowButton(collabId),
+                ),
               ],
             ),
           ),
@@ -317,10 +311,14 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
     );
   }
 
-  Widget _buildDescriptionText(String collabId, String description) {
+  Widget _buildDescriptionText(
+    String collabId,
+    String title,
+    String description, {
+    int collapsedLines = 2,
+  }) {
     final trimmed = description.trim();
     if (trimmed.isEmpty) return const SizedBox.shrink();
-    final isExpanded = _expandedDescriptionIds.contains(collabId);
     final canExpand = trimmed.length > 140;
     final textStyle = MingaTheme.textMuted.copyWith(
       color: MingaTheme.textSecondary,
@@ -333,23 +331,18 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
         Text(
           trimmed,
           style: textStyle,
-          maxLines: isExpanded ? 6 : 2,
+          maxLines: collapsedLines,
           overflow: TextOverflow.ellipsis,
         ),
         if (canExpand) ...[
           const SizedBox(height: 4),
           GestureDetector(
-            onTap: () {
-              setState(() {
-                if (isExpanded) {
-                  _expandedDescriptionIds.remove(collabId);
-                } else {
-                  _expandedDescriptionIds.add(collabId);
-                }
-              });
-            },
+            onTap: () => _showCollabTextSheet(
+              title: title,
+              description: trimmed,
+            ),
             child: Text(
-              isExpanded ? 'Weniger' : 'Mehr anzeigen',
+              'Mehr anzeigen',
               style: MingaTheme.bodySmall.copyWith(
                 color: MingaTheme.accentGreen,
                 fontWeight: FontWeight.w600,
@@ -358,6 +351,114 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
           ),
         ],
       ],
+    );
+  }
+
+  Future<void> _showCollabTextSheet({
+    required String title,
+    required String description,
+  }) async {
+    final trimmedTitle = title.trim();
+    final trimmedDescription = description.trim();
+    if (trimmedTitle.isEmpty && trimmedDescription.isEmpty) return;
+    final maxHeight = MediaQuery.of(context).size.height * 0.7;
+    await showGlassBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: maxHeight),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text('Editorial', style: MingaTheme.titleSmall),
+                ),
+                IconButton(
+                  icon: Icon(Icons.close, color: MingaTheme.textSecondary),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ],
+            ),
+            Expanded(
+              child: SingleChildScrollView(
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
+                  decoration: BoxDecoration(
+                    color: MingaTheme.glassOverlaySoft,
+                    borderRadius: BorderRadius.circular(MingaTheme.radiusMd),
+                    border: Border.all(color: MingaTheme.borderEmphasis),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (trimmedTitle.isNotEmpty) ...[
+                        Text(
+                          trimmedTitle,
+                          style: MingaTheme.titleMedium.copyWith(height: 1.2),
+                        ),
+                        const SizedBox(height: 10),
+                      ],
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            width: 3,
+                            height: 48,
+                            margin: const EdgeInsets.only(right: 10, top: 2),
+                            decoration: BoxDecoration(
+                              color: MingaTheme.accentGreen,
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                          Expanded(
+                            child: Text(
+                              trimmedDescription,
+                              style: MingaTheme.textMuted.copyWith(
+                                color: MingaTheme.textPrimary,
+                                fontSize: 15,
+                                height: 1.5,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDescriptionSection(
+    String collabId,
+    String title,
+    String description,
+  ) {
+    final trimmed = description.trim();
+    if (trimmed.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: MingaTheme.glassOverlaySoft,
+          borderRadius: BorderRadius.circular(MingaTheme.radiusMd),
+          border: Border.all(color: MingaTheme.borderEmphasis),
+        ),
+        child: _buildDescriptionText(
+          collabId,
+          title,
+          trimmed,
+          collapsedLines: 3,
+        ),
+      ),
     );
   }
 
@@ -712,16 +813,40 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
         await WidgetsBinding.instance.endOfFrame;
         await _waitForPaint(renderObject);
       }
-      final pixelRatio =
-          MediaQuery.of(context).devicePixelRatio.clamp(2.0, 3.0);
-      final image = await renderObject.toImage(pixelRatio: pixelRatio);
+      final deviceRatio = MediaQuery.of(context).devicePixelRatio;
+      final candidates = <double>{
+        deviceRatio.clamp(1.8, 2.5),
+        2.0,
+        1.5,
+      }.toList()
+        ..sort((a, b) => b.compareTo(a));
+      Object? lastError;
+      for (final ratio in candidates) {
+        try {
+          return await _captureShareCard(renderObject, ratio);
+        } catch (error) {
+          lastError = error;
+        }
+      }
+      throw lastError ?? StateError('Share card render failed');
+    } finally {
+      entry.remove();
+    }
+  }
+
+  Future<Uint8List> _captureShareCard(
+    RenderRepaintBoundary boundary,
+    double pixelRatio,
+  ) async {
+    final image = await boundary.toImage(pixelRatio: pixelRatio);
+    try {
       final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
       if (byteData == null) {
         throw StateError('Share card image bytes missing');
       }
       return byteData.buffer.asUint8List();
     } finally {
-      entry.remove();
+      image.dispose();
     }
   }
 
@@ -845,12 +970,16 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
   Widget _buildCollabContent(String collabId) {
     final collabDefinition = _findCollab(collabId);
     if (collabDefinition != null) {
+      final description =
+          _descriptionOverrides[collabId] ?? collabDefinition.subtitle;
+      final title = _titleOverrides[collabId] ?? collabDefinition.title;
       return SingleChildScrollView(
         padding: EdgeInsets.only(bottom: bottomNavSafePadding(context)),
         child: Column(
           children: [
             _buildHero(collabId, collabDefinition),
             _buildOwnerActions(collabId, collabDefinition.creatorId),
+            _buildDescriptionSection(collabId, title, description),
             _buildPlacesList(collabDefinition),
           ],
         ),
@@ -873,6 +1002,11 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
         children: [
           _buildSupabaseHero(collabId, collab),
           _buildOwnerActions(collabId, collab.ownerId),
+          _buildDescriptionSection(
+            collabId,
+            collab.title,
+            collab.description ?? '',
+          ),
           _buildSupabasePlacesList(collabId),
         ],
       ),
@@ -938,60 +1072,51 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
             left: 20,
             right: 20,
             bottom: 20,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
+                Text(
+                  collab.title,
+                  style: MingaTheme.titleLarge.copyWith(height: 1.2),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                SizedBox(height: 8),
+                GestureDetector(
+                  onTap: () => _openCreatorProfile(collab.ownerId),
+                  child: Row(
                     children: [
+                      CircleAvatar(
+                        radius: 12,
+                        backgroundColor: MingaTheme.darkOverlay,
+                        backgroundImage: avatarUrl == null || avatarUrl.isEmpty
+                            ? null
+                            : NetworkImage(avatarUrl),
+                        child: avatarUrl == null || avatarUrl.isEmpty
+                            ? Icon(Icons.person,
+                                size: 14,
+                                color: MingaTheme.textSecondary)
+                            : null,
+                      ),
+                      SizedBox(width: 8),
                       Text(
-                        collab.title,
-                        style: MingaTheme.titleLarge.copyWith(height: 1.2),
-                      ),
-                      SizedBox(height: 8),
-                      GestureDetector(
-                        onTap: () => _openCreatorProfile(collab.ownerId),
-                        child: Row(
-                          children: [
-                            CircleAvatar(
-                              radius: 12,
-                              backgroundColor: MingaTheme.darkOverlay,
-                              backgroundImage: avatarUrl == null || avatarUrl.isEmpty
-                                  ? null
-                                  : NetworkImage(avatarUrl),
-                              child: avatarUrl == null || avatarUrl.isEmpty
-                                  ? Icon(Icons.person,
-                                      size: 14,
-                                      color: MingaTheme.textSecondary)
-                                  : null,
-                            ),
-                            SizedBox(width: 8),
-                            Text(
-                              'von $username',
-                              style: MingaTheme.textMuted.copyWith(
-                                color: MingaTheme.textSecondary,
-                                fontSize: 14,
-                              ),
-                            ),
-                          ],
+                        'von $username',
+                        style: MingaTheme.textMuted.copyWith(
+                          color: MingaTheme.textSecondary,
+                          fontSize: 14,
                         ),
                       ),
-                      if ((collab.description ?? '').trim().isNotEmpty) ...[
-                        SizedBox(height: 6),
-                        _buildDescriptionText(
-                          collabId,
-                          collab.description!.trim(),
-                        ),
-                      ],
                     ],
                   ),
                 ),
-                SizedBox(width: 12),
-                _isOwnerById(collab.ownerId)
-                    ? _buildSupabaseEditButton(collabId, collab)
-                    : _buildFollowButton(collabId),
+                SizedBox(height: 12),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: _isOwnerById(collab.ownerId)
+                      ? _buildSupabaseEditButton(collabId, collab)
+                      : _buildFollowButton(collabId),
+                ),
               ],
             ),
           ),

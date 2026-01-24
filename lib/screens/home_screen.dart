@@ -14,7 +14,6 @@ import '../models/collab.dart';
 import '../models/app_location.dart';
 import '../services/supabase_collabs_repository.dart';
 import '../services/supabase_profile_repository.dart';
-import '../services/supabase_favorites_repository.dart';
 import '../services/supabase_gate.dart';
 import '../services/supabase_chat_repository.dart';
 import '../services/activity_service.dart';
@@ -43,8 +42,6 @@ class _HomeScreenState extends State<HomeScreen> {
       SupabaseCollabsRepository();
   final SupabaseProfileRepository _profileRepository =
       SupabaseProfileRepository();
-  final SupabaseFavoritesRepository _favoritesRepository =
-      SupabaseFavoritesRepository();
   final LocationStore _locationStore = LocationStore();
   Place? _streamPreviewPlace;
   List<Place> _hypePlaces = [];
@@ -52,16 +49,15 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isStreamPreviewLoading = false;
   bool _isCollabLoading = true;
   bool _isFollowingLoading = true;
-  bool _isFollowedSystemLoading = true;
   List<Collab> _publicCollabs = [];
   List<Collab> _savedCollabs = [];
   List<CollabDefinition> _systemCollabs = [];
-  List<CollabDefinition> _followedSystemCollabs = [];
   bool _isSystemCollabsLoading = true;
   final Map<String, int> _collabSaveCounts = {};
   final Map<String, UserProfile> _creatorProfiles = {};
   final Map<String, List<String>> _fallbackMediaByCollabId = {};
   bool _showQuickIntro = true;
+  bool _wasVisible = true;
   static const String _quickIntroKey = 'home_quick_intro_dismissed';
   static const double _hypeMaxDistanceKm = 20;
   static const int _hypeLimit = 5;
@@ -337,6 +333,15 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadHypePlaces();
   }
 
+  void _maybeReloadOnVisibility() {
+    final isVisible = TickerMode.of(context);
+    if (isVisible == _wasVisible) return;
+    _wasVisible = isVisible;
+    if (isVisible) {
+      _locationStore.refreshFromStorage();
+    }
+  }
+
   Future<void> _loadQuickIntroPreference() async {
     final prefs = await SharedPreferences.getInstance();
     final dismissed = prefs.getBool(_quickIntroKey) ?? false;
@@ -412,8 +417,6 @@ class _HomeScreenState extends State<HomeScreen> {
           setState(() {
             _savedCollabs = [];
             _isFollowingLoading = false;
-            _followedSystemCollabs = [];
-            _isFollowedSystemLoading = false;
           });
         }
         return;
@@ -425,8 +428,6 @@ class _HomeScreenState extends State<HomeScreen> {
           setState(() {
             _savedCollabs = [];
             _isFollowingLoading = false;
-            _followedSystemCollabs = [];
-            _isFollowedSystemLoading = false;
           });
         }
         return;
@@ -434,8 +435,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
       final collabs =
           await _collabsRepository.fetchSavedCollabs(userId: currentUser.id);
-      final followedSystem =
-          await _loadFollowedSystemCollabs(currentUser.id);
 
       final userIds = collabs.map((list) => list.ownerId).toSet();
       final profiles = await Future.wait(
@@ -452,8 +451,6 @@ class _HomeScreenState extends State<HomeScreen> {
         setState(() {
           _savedCollabs = collabs;
           _isFollowingLoading = false;
-          _followedSystemCollabs = followedSystem;
-          _isFollowedSystemLoading = false;
         });
       }
       _loadFallbackMediaForCollabs(collabs);
@@ -466,26 +463,6 @@ class _HomeScreenState extends State<HomeScreen> {
           _isFollowingLoading = false;
         });
       }
-    }
-  }
-
-  Future<List<CollabDefinition>> _loadFollowedSystemCollabs(
-    String userId,
-  ) async {
-    try {
-      final lists = await _favoritesRepository.fetchCollabLists(userId: userId);
-      if (lists.isEmpty) return [];
-      await SystemCollabsStore.load();
-      final matched = <String, CollabDefinition>{};
-      for (final list in lists) {
-        final collab = SystemCollabsStore.findByTitle(list.collabTitle);
-        if (collab != null) {
-          matched[collab.id] = collab;
-        }
-      }
-      return matched.values.toList();
-    } catch (_) {
-      return [];
     }
   }
 
@@ -770,7 +747,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    
+    _maybeReloadOnVisibility();
     return Scaffold(
       backgroundColor: MingaTheme.background,
       body: SafeArea(
@@ -801,17 +778,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   isLoading: _isSystemCollabsLoading,
                 ),
                 SizedBox(height: 28),
-                if (_followedSystemCollabs.isNotEmpty ||
-                    _isFollowedSystemLoading) ...[
-                  _buildSystemCollabSection(
-                    title: 'Gefolgt',
-                    collabs: _followedSystemCollabs,
-                    isLoading: _isFollowedSystemLoading,
-                  ),
-                  SizedBox(height: 28),
-                ],
                 _buildCollabSection(
-                  title: 'Following Collabs',
+                  title: 'Gefolgt',
                   collabs: _savedCollabs,
                   filter: CollabsExploreFilter.following,
                   isLoading: _isFollowingLoading,

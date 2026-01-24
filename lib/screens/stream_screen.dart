@@ -691,35 +691,33 @@ class StreamScreenState extends State<StreamScreen>
     final nextLng = location.lng;
     final nextLabel = location.label;
     final nextSource = location.source;
+    final prevLat = _userLat;
+    final prevLng = _userLng;
     final prevLabel = _userLabel;
     final prevSource = _userSource;
+    final coordsChanged = nextLat != prevLat || nextLng != prevLng;
 
     debugPrint(
       'USER_LOC lat=$nextLat lng=$nextLng available=$hasLocation source=${location.source}',
     );
 
     if (!force &&
-        nextLat == _userLat &&
-        nextLng == _userLng &&
+        !coordsChanged &&
         nextLabel == prevLabel &&
         nextSource == prevSource) {
       return;
     }
-
-    final hadLocation = _hasUserLocation;
-    final locationChanged = force || hadLocation != hasLocation;
 
     _userLat = nextLat;
     _userLng = nextLng;
     _userLabel = nextLabel;
     _userSource = nextSource;
 
-    if (!locationChanged &&
-        nextLabel == prevLabel &&
-        nextSource == prevSource) {
-      return;
+    final shouldResort =
+        force || coordsChanged || nextLabel != prevLabel || nextSource != prevSource;
+    if (shouldResort) {
+      _resortStreamPlaces();
     }
-    _resortStreamPlaces();
   }
 
   void _resortStreamPlaces() {
@@ -890,6 +888,10 @@ class _StreamChatPaneState extends State<StreamChatPane> {
   StreamSubscription<List<PresenceProfile>>? _presenceRosterSubscription;
   final DraggableScrollableController _sheetController =
       DraggableScrollableController();
+  static const double _sheetCollapsedSize = 0.2;
+  static const double _sheetExpandedSize = 0.75;
+  static const double _sheetMaxSize = 0.92;
+  static const double _sheetToggleThreshold = 0.03;
   bool _isSheetExpanded = true;
   List<ChatMessage> _messages = [];
   final List<ChatMessage> _systemMessages = [];
@@ -977,21 +979,14 @@ class _StreamChatPaneState extends State<StreamChatPane> {
   }
 
   Future<void> _toggleChatSheet() async {
-    final target = _isSheetExpanded ? 0.2 : 0.75;
+    if (!_sheetController.isAttached) return;
+    final currentSize = _sheetController.size;
+    final target = currentSize >=
+            (_sheetExpandedSize - _sheetToggleThreshold)
+        ? _sheetCollapsedSize
+        : _sheetExpandedSize;
     setState(() {
-      _isSheetExpanded = !_isSheetExpanded;
-    });
-    await _sheetController.animateTo(
-      target,
-      duration: const Duration(milliseconds: 240),
-      curve: Curves.easeOut,
-    );
-  }
-
-  Future<void> _toggleMediaFocus() async {
-    final target = _isSheetExpanded ? 0.2 : 0.75;
-    setState(() {
-      _isSheetExpanded = !_isSheetExpanded;
+      _isSheetExpanded = target == _sheetExpandedSize;
     });
     await _sheetController.animateTo(
       target,
@@ -1016,83 +1011,120 @@ class _StreamChatPaneState extends State<StreamChatPane> {
             mediaPosts: _mediaPosts,
             liveCount: widget.liveCount,
             borderRadius: BorderRadius.zero,
-            topRightActions: IconButton(
-              icon: Icon(
-                _isSheetExpanded ? Icons.open_in_full : Icons.close_fullscreen,
-                color: tokens.colors.textPrimary,
-              ),
-              onPressed: _toggleMediaFocus,
-            ),
+            topRightActions: null,
             useAspectRatio: false,
             useTopSafeArea: false,
           ),
         ),
-        DraggableScrollableSheet(
-          controller: _sheetController,
-          initialChildSize: 0.75,
-          minChildSize: 0.2,
-          maxChildSize: 0.92,
-          builder: (context, scrollController) {
-            return Container(
-              decoration: BoxDecoration(
-                color: tokens.colors.bg,
-                borderRadius: BorderRadius.vertical(
-                  top: Radius.circular(tokens.radius.lg),
-                ),
-              ),
-              child: Column(
-                children: [
-                  SizedBox(height: tokens.space.s8),
-                  GestureDetector(
-                    onTap: _toggleChatSheet,
-                    behavior: HitTestBehavior.opaque,
-                    child: Column(
-                      children: [
-                        Container(
-                          width: tokens.space.s32,
-                          height: tokens.space.s4,
-                          decoration: BoxDecoration(
-                            color: tokens.colors.textMuted.withOpacity(0.5),
-                            borderRadius:
-                                BorderRadius.circular(tokens.radius.pill),
-                          ),
-                        ),
-                        Padding(
-                          padding: EdgeInsets.fromLTRB(
-                            tokens.space.s16,
-                            tokens.space.s12,
-                            tokens.space.s16,
-                            tokens.space.s8,
-                          ),
-                          child: Row(
-                            children: [
-                              Text(
-                                'Live-Chat',
-                                style: tokens.type.title.copyWith(
-                                  color: tokens.colors.textPrimary,
-                                ),
-                              ),
-                              const Spacer(),
-                              Text(
-                                '${displayMessages.length} Nachrichten',
-                                style: tokens.type.caption.copyWith(
-                                  color: tokens.colors.textMuted,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Expanded(
-                    child: _buildChatList(displayMessages, scrollController),
-                  ),
-                  _buildChatInput(roomId),
-                ],
-              ),
-            );
+        NotificationListener<DraggableScrollableNotification>(
+          onNotification: (notification) {
+            final isExpanded = notification.extent >=
+                (_sheetExpandedSize - _sheetToggleThreshold);
+            if (isExpanded != _isSheetExpanded && mounted) {
+              setState(() {
+                _isSheetExpanded = isExpanded;
+              });
+            }
+            return false;
           },
+          child: DraggableScrollableSheet(
+            controller: _sheetController,
+            initialChildSize: _sheetExpandedSize,
+            minChildSize: _sheetCollapsedSize,
+            maxChildSize: _sheetMaxSize,
+            snap: true,
+            snapSizes: const [_sheetCollapsedSize, _sheetExpandedSize],
+            builder: (context, scrollController) {
+              return Container(
+                decoration: BoxDecoration(
+                  color: tokens.colors.bg,
+                  borderRadius: BorderRadius.vertical(
+                    top: Radius.circular(tokens.radius.lg),
+                  ),
+                ),
+                child: Column(
+                  children: [
+                    SizedBox(height: tokens.space.s8),
+                    GestureDetector(
+                      onTap: _toggleChatSheet,
+                      behavior: HitTestBehavior.opaque,
+                      child: Column(
+                        children: [
+                          Container(
+                            width: tokens.space.s32,
+                            height: tokens.space.s4,
+                            decoration: BoxDecoration(
+                              color: tokens.colors.textMuted.withOpacity(0.5),
+                              borderRadius:
+                                  BorderRadius.circular(tokens.radius.pill),
+                            ),
+                          ),
+                          Padding(
+                            padding: EdgeInsets.fromLTRB(
+                              tokens.space.s16,
+                              tokens.space.s12,
+                              tokens.space.s16,
+                              tokens.space.s8,
+                            ),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    'Live-Chat',
+                                    style: tokens.type.title.copyWith(
+                                      color: tokens.colors.textPrimary,
+                                    ),
+                                  ),
+                                ),
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      '${displayMessages.length} Nachrichten',
+                                      style: tokens.type.caption.copyWith(
+                                        color: tokens.colors.textMuted,
+                                      ),
+                                    ),
+                                    SizedBox(width: tokens.space.s8),
+                                    GestureDetector(
+                                      onTap: _toggleChatSheet,
+                                      child: Container(
+                                        width: 28,
+                                        height: 28,
+                                        decoration: BoxDecoration(
+                                          color: tokens.colors.surfaceStrong,
+                                          borderRadius:
+                                              BorderRadius.circular(tokens.radius.pill),
+                                          border: Border.all(
+                                            color: tokens.colors.borderStrong,
+                                          ),
+                                        ),
+                                        child: Icon(
+                                          _isSheetExpanded
+                                              ? Icons.keyboard_arrow_down
+                                              : Icons.keyboard_arrow_up,
+                                          color: tokens.colors.textSecondary,
+                                          size: 20,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: _buildChatList(displayMessages, scrollController),
+                    ),
+                    _buildChatInput(roomId),
+                  ],
+                ),
+              );
+            },
+          ),
         ),
       ],
     );
@@ -1104,13 +1136,24 @@ class _StreamChatPaneState extends State<StreamChatPane> {
   ) {
     final tokens = context.tokens;
     if (textMessages.isEmpty) {
-      return Center(
-        child: Text(
-          'Starte den Chat in diesem Raum',
-          style: tokens.type.caption.copyWith(
-            color: tokens.colors.textMuted,
-          ),
+      return ListView(
+        controller: scrollController,
+        physics: const BouncingScrollPhysics(),
+        padding: EdgeInsets.symmetric(
+          horizontal: tokens.space.s16,
+          vertical: tokens.space.s12,
         ),
+        children: [
+          SizedBox(height: tokens.space.s32),
+          Center(
+            child: Text(
+              'Starte den Chat in diesem Raum',
+              style: tokens.type.caption.copyWith(
+                color: tokens.colors.textMuted,
+              ),
+            ),
+          ),
+        ],
       );
     }
     return ListView.builder(
