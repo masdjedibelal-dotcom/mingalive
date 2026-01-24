@@ -1,5 +1,21 @@
 import '../models/collab.dart';
+import 'collabs.dart';
 import '../services/supabase_gate.dart';
+
+const String eventsThisWeekCollabId = 'events_this_week';
+const CollabDefinition _eventsThisWeekCollab = CollabDefinition(
+  id: eventsThisWeekCollabId,
+  title: 'Events diese Woche',
+  subtitle: 'Die nächsten Highlights der Woche',
+  creatorId: 'localspots',
+  creatorName: 'LocalSpots',
+  creatorAvatarUrl: null,
+  heroType: 'gradient',
+  gradientKey: 'deep',
+  query: CollabQuery(),
+  limit: 30,
+  requiresRuntime: false,
+);
 
 class SystemCollabsStore {
   static List<CollabDefinition>? _cache;
@@ -7,7 +23,9 @@ class SystemCollabsStore {
   static Future<List<CollabDefinition>> load() async {
     if (_cache != null) return _cache!;
     if (!SupabaseGate.isEnabled) {
-      _cache = const [];
+      final fallback = List<CollabDefinition>.from(collabDefinitions);
+      fallback.insert(0, _eventsThisWeekCollab);
+      _cache = fallback;
       return _cache!;
     }
     final supabase = SupabaseGate.client;
@@ -70,6 +88,13 @@ class SystemCollabsStore {
           ranking: ranking,
         ),
       );
+    }
+
+    final hasEventsThisWeek = result.any((collab) =>
+        collab.id == eventsThisWeekCollabId ||
+        collab.title.trim().toLowerCase() == 'events diese woche');
+    if (!hasEventsThisWeek) {
+      result.insert(0, _eventsThisWeekCollab);
     }
 
     _cache = result;

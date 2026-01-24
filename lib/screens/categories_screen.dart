@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'theme.dart';
+import '../data/event_repository.dart';
 import '../data/place_repository.dart';
+import 'event_list_screen.dart';
 import 'list_screen.dart';
 import 'main_shell.dart';
 import '../utils/bottom_nav_padding.dart';
@@ -30,7 +32,9 @@ class CategoriesScreen extends StatelessWidget {
           style: MingaTheme.titleMedium,
         ),
       ),
-      body: CategoriesView(kind: kind),
+      body: kind == 'events'
+          ? const EventsCategoriesView()
+          : CategoriesView(kind: kind),
     );
   }
 }
@@ -399,6 +403,274 @@ class _CategoriesViewState extends State<CategoriesView> {
                       ),
           ),
         ],
+    );
+  }
+}
+
+class EventsCategoriesView extends StatefulWidget {
+  final bool showSearchField;
+
+  const EventsCategoriesView({super.key, this.showSearchField = true});
+
+  @override
+  State<EventsCategoriesView> createState() => _EventsCategoriesViewState();
+}
+
+class _EventsCategoriesViewState extends State<EventsCategoriesView> {
+  final EventRepository _repository = EventRepository();
+  final TextEditingController _searchController = TextEditingController();
+  List<String>? _allCategories;
+  List<String>? _filteredCategories;
+  bool _isLoading = true;
+  Map<String, IconData> _iconByCategory = {};
+  static const _fallbackIcons = [
+    Icons.event,
+    Icons.event_available,
+    Icons.music_note,
+    Icons.theater_comedy,
+    Icons.local_activity,
+    Icons.celebration,
+    Icons.festival,
+    Icons.museum,
+  ];
+  static const _tilePalettes = [
+    [Color(0xFF1D2B64), Color(0xFF1A3F8B)],
+    [Color(0xFF145A32), Color(0xFF1D8348)],
+    [Color(0xFF512E5F), Color(0xFF6C3483)],
+    [Color(0xFF7B241C), Color(0xFF922B21)],
+    [Color(0xFF0B5345), Color(0xFF117864)],
+    [Color(0xFF512E2E), Color(0xFF784212)],
+    [Color(0xFF1B4F72), Color(0xFF21618C)],
+    [Color(0xFF4A235A), Color(0xFF5B2C6F)],
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCategories();
+    _searchController.addListener(_filterCategories);
+  }
+
+  @override
+  void dispose() {
+    _searchController.removeListener(_filterCategories);
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _filterCategories() {
+    final query = _searchController.text.toLowerCase().trim();
+    if (_allCategories == null) return;
+
+    if (query.isEmpty) {
+      setState(() {
+        _filteredCategories = List<String>.from(_allCategories!);
+      });
+    } else {
+      setState(() {
+        _filteredCategories = _allCategories!
+            .where((category) => category.toLowerCase().contains(query))
+            .toList();
+      });
+    }
+  }
+
+  Future<void> _loadCategories() async {
+    try {
+      final categories = await _repository.fetchCategories(limit: 1000);
+      if (mounted) {
+        setState(() {
+          _allCategories = categories;
+          _filteredCategories = categories;
+          _iconByCategory = _buildIconMap(categories);
+          _isLoading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _allCategories = [];
+          _filteredCategories = [];
+          _iconByCategory = {};
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  _CategoryStyle _getCategoryStyle(String category) {
+    final palette =
+        _tilePalettes[category.hashCode.abs() % _tilePalettes.length];
+    final icon = _iconByCategory[category] ?? Icons.event;
+    return _CategoryStyle(icon: icon, colors: palette);
+  }
+
+  Map<String, IconData> _buildIconMap(List<String> categories) {
+    final overrides = <String, IconData>{
+      'KONZERTE': Icons.music_note,
+      'THEATER': Icons.theater_comedy,
+      'AUSSTELLUNGEN': Icons.museum,
+      'SHOWS': Icons.local_activity,
+      'FESTIVAL': Icons.festival,
+    };
+    final used = <IconData>{...overrides.values};
+    final icons = _fallbackIcons.where((icon) => !used.contains(icon)).toList();
+    var iconIndex = 0;
+    final mapping = <String, IconData>{};
+    for (final category in categories) {
+      final key = category.toUpperCase();
+      final override = overrides[key];
+      if (override != null) {
+        mapping[category] = override;
+        continue;
+      }
+      if (iconIndex < icons.length) {
+        mapping[category] = icons[iconIndex];
+        iconIndex += 1;
+      } else {
+        mapping[category] = Icons.event;
+      }
+    }
+    return mapping;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        if (widget.showSearchField)
+          Padding(
+            padding: const EdgeInsets.all(20),
+            child: GlassSurface(
+              radius: 16,
+              blurSigma: 16,
+              overlayColor: MingaTheme.glassOverlayXSoft,
+              child: TextField(
+                controller: _searchController,
+                style: MingaTheme.body,
+                decoration: InputDecoration(
+                  hintText: 'Kategorien suchen...',
+                  hintStyle: MingaTheme.bodySmall.copyWith(
+                    color: MingaTheme.textSubtle,
+                  ),
+                  prefixIcon:
+                      Icon(Icons.search, color: MingaTheme.textSubtle),
+                  filled: true,
+                  fillColor: MingaTheme.transparent,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(MingaTheme.radiusMd),
+                    borderSide: BorderSide.none,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(vertical: 16),
+                ),
+              ),
+            ),
+          ),
+        Expanded(
+          child: _isLoading
+              ? Center(
+                  child: CircularProgressIndicator(
+                    color: MingaTheme.accentGreen,
+                  ),
+                )
+              : _filteredCategories == null || _filteredCategories!.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.event_busy,
+                            size: 64,
+                            color: MingaTheme.textSubtle,
+                          ),
+                          SizedBox(height: 24),
+                          Text(
+                            _searchController.text.isNotEmpty
+                                ? 'Keine Ergebnisse gefunden'
+                                : 'Keine Kategorien gefunden',
+                            style: MingaTheme.titleSmall.copyWith(
+                              color: MingaTheme.textSubtle,
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  : GridView.builder(
+                      padding: EdgeInsets.fromLTRB(
+                        20,
+                        0,
+                        20,
+                        bottomNavSafePadding(context),
+                      ),
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 3,
+                        crossAxisSpacing: 12,
+                        mainAxisSpacing: 12,
+                        childAspectRatio: 0.78,
+                      ),
+                      itemCount: _filteredCategories!.length,
+                      itemBuilder: (context, index) {
+                        final category = _filteredCategories![index];
+                        final style = _getCategoryStyle(category);
+                        return GestureDetector(
+                          onTap: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (context) => EventListScreen(
+                                  categoryName: category,
+                                ),
+                              ),
+                            );
+                          },
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: Container(
+                                  width: double.infinity,
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(20),
+                                    gradient: LinearGradient(
+                                      begin: Alignment.topLeft,
+                                      end: Alignment.bottomRight,
+                                      colors: style.colors,
+                                    ),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withOpacity(0.22),
+                                        blurRadius: 12,
+                                        offset: const Offset(0, 6),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Center(
+                                    child: Icon(
+                                      style.icon,
+                                      size: 38,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                category,
+                                style: MingaTheme.body.copyWith(
+                                  color: MingaTheme.textPrimary,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 12,
+                                ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+        ),
+      ],
     );
   }
 }

@@ -11,8 +11,10 @@ import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 import 'theme.dart';
 import '../data/collabs.dart';
+import '../data/event_repository.dart';
 import '../data/place_repository.dart';
 import '../models/collab.dart';
+import '../models/event.dart';
 import '../models/place.dart';
 import '../services/auth_service.dart';
 import '../services/location_service.dart';
@@ -82,6 +84,7 @@ class _CollabShareData {
 class _CollabDetailScreenState extends State<CollabDetailScreen> {
   static const int _noteMaxChars = 120;
   final PlaceRepository _repository = PlaceRepository();
+  final EventRepository _eventRepository = EventRepository();
   final SupabaseFavoritesRepository _favoritesRepository =
       SupabaseFavoritesRepository();
   final SupabaseCollabsRepository _collabsRepository =
@@ -1329,6 +1332,7 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
       final description =
           _descriptionOverrides[collabId] ?? collabDefinition.subtitle;
       final title = _titleOverrides[collabId] ?? collabDefinition.title;
+      final isEventsThisWeek = collabDefinition.id == eventsThisWeekCollabId;
       return SingleChildScrollView(
         padding: EdgeInsets.only(bottom: bottomNavSafePadding(context)),
         child: Column(
@@ -1336,7 +1340,10 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
             _buildHero(collabId, collabDefinition),
             _buildOwnerActions(collabId, collabDefinition.creatorId),
             _buildDescriptionSection(collabId, title, description),
-            _buildPlacesList(collabDefinition),
+            if (isEventsThisWeek)
+              _buildEventsThisWeekList()
+            else
+              _buildPlacesList(collabDefinition),
           ],
         ),
       );
@@ -1556,6 +1563,132 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
         );
       },
     );
+  }
+
+  Widget _buildEventsThisWeekList() {
+    return FutureBuilder<List<Event>>(
+      future: _eventRepository.fetchEventsThisWeek(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Center(
+            child: CircularProgressIndicator(
+              color: MingaTheme.accentGreen,
+            ),
+          );
+        }
+
+        final events = snapshot.data ?? [];
+        if (events.isEmpty) {
+          return Center(
+            child: Text(
+              'Keine Events diese Woche',
+              style: MingaTheme.body.copyWith(
+                color: MingaTheme.textSubtle,
+              ),
+            ),
+          );
+        }
+
+        final limitedEvents =
+            events.length > 30 ? events.take(30).toList() : events;
+        return ListView.separated(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+          itemCount: limitedEvents.length,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          separatorBuilder: (_, __) => const SizedBox(height: 12),
+          itemBuilder: (context, index) {
+            return _buildEventCard(limitedEvents[index]);
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildEventCard(Event event) {
+    final dateText = _formatEventDateLine(event);
+    final locationText = _formatEventLocation(event);
+    final descriptionText = _sanitizeEventDescription(event.description);
+    return GlassSurface(
+      radius: MingaTheme.cardRadius,
+      blurSigma: 18,
+      overlayColor: MingaTheme.glassOverlay,
+      boxShadow: MingaTheme.cardShadow,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              event.title.trim(),
+              style: MingaTheme.titleSmall.copyWith(fontSize: 16),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              dateText,
+              style: MingaTheme.bodySmall.copyWith(
+                color: MingaTheme.textSecondary,
+              ),
+            ),
+            if (locationText.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                locationText,
+                style: MingaTheme.bodySmall.copyWith(
+                  color: MingaTheme.textSubtle,
+                ),
+              ),
+            ],
+            if (descriptionText.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Text(
+                descriptionText,
+                style: MingaTheme.bodySmall.copyWith(
+                  color: MingaTheme.textSecondary,
+                  height: 1.4,
+                ),
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _formatEventDateLine(Event event) {
+    DateTime? start = event.effectiveStart;
+    if (start == null && event.startDate != null) {
+      start = DateTime.tryParse(event.startDate!.trim());
+    }
+    if (start == null) return 'Datum folgt';
+    final local = start.toLocal();
+    final day = local.day.toString().padLeft(2, '0');
+    final month = local.month.toString().padLeft(2, '0');
+    final year = local.year.toString();
+    final time = event.startTime?.trim();
+    if (time != null && time.isNotEmpty) {
+      final hhmm = time.length >= 5 ? time.substring(0, 5) : time;
+      return '$day.$month.$year · $hhmm';
+    }
+    final hour = local.hour.toString().padLeft(2, '0');
+    final minute = local.minute.toString().padLeft(2, '0');
+    return '$day.$month.$year · $hour:$minute';
+  }
+
+  String _formatEventLocation(Event event) {
+    final venue = event.venueName?.trim();
+    if (venue != null && venue.isNotEmpty) return venue;
+    final venueId = event.venueId?.trim();
+    if (venueId != null && venueId.isNotEmpty) return venueId;
+    return '';
+  }
+
+  String _sanitizeEventDescription(String description) {
+    return description.replaceAll(RegExp(r'\s+'), ' ').trim();
   }
 
   Future<List<Place>> _fetchSupabaseCollabPlaces(String collabId) async {

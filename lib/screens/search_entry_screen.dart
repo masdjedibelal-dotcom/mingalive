@@ -4,6 +4,7 @@ import '../data/place_repository.dart';
 import '../services/search_router.dart';
 import '../services/gpt_search_suggestions_service.dart';
 import 'detail_screen.dart';
+import 'event_list_screen.dart';
 import 'list_screen.dart';
 import 'main_shell.dart';
 import 'trip_plan_screen.dart';
@@ -47,7 +48,7 @@ class _SearchEntryScreenState extends State<SearchEntryScreen>
   void initState() {
     super.initState();
     _activeKind = widget.kind.trim().isEmpty ? 'food' : widget.kind.trim();
-    _kinds = const ['food', 'sight'];
+    _kinds = const ['food', 'sight', 'events'];
     final initialIndex =
         _kinds.indexOf(_activeKind).clamp(0, _kinds.length - 1);
     _tabController = TabController(length: _kinds.length, vsync: this);
@@ -102,16 +103,29 @@ class _SearchEntryScreenState extends State<SearchEntryScreen>
   Future<void> _executeSearchAction(SearchAction action) async {
     switch (action.type) {
       case SearchActionType.openList:
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (context) => ListScreen(
-              categoryName: action.categoryName,
-              searchTerm: action.searchTerm,
-              kind: _activeKind,
-              openPlaceChat: widget.openPlaceChat,
+        if (action.categoryName == 'EVENTS' || _activeKind == 'events') {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (context) => EventListScreen(
+                categoryName: action.categoryName == 'EVENTS'
+                    ? action.categoryName
+                    : null,
+                searchTerm: action.searchTerm,
+              ),
             ),
-          ),
-        );
+          );
+        } else {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (context) => ListScreen(
+                categoryName: action.categoryName,
+                searchTerm: action.searchTerm,
+                kind: _activeKind,
+                openPlaceChat: widget.openPlaceChat,
+              ),
+            ),
+          );
+        }
         break;
       case SearchActionType.openStream:
         MainShell.of(context)?.switchToTab(1);
@@ -196,6 +210,13 @@ class _SearchEntryScreenState extends State<SearchEntryScreen>
   }
 
   Future<void> _loadGptSuggestions() async {
+    if (_activeKind == 'events') {
+      setState(() {
+        _gptSuggestions = const [];
+        _isLoadingGpt = false;
+      });
+      return;
+    }
     setState(() {
       _isLoadingGpt = true;
     });
@@ -364,6 +385,7 @@ class _SearchEntryScreenState extends State<SearchEntryScreen>
                     tabs: const [
                       Tab(text: 'Essen & Trinken'),
                       Tab(text: 'Places'),
+                      Tab(text: 'Events'),
                     ],
                   ),
                 ),
@@ -378,6 +400,7 @@ class _SearchEntryScreenState extends State<SearchEntryScreen>
             children: const [
               CategoriesView(kind: 'food', showSearchField: false),
               CategoriesView(kind: 'sight', showSearchField: false),
+              EventsCategoriesView(showSearchField: false),
             ],
           ),
         ),
@@ -385,6 +408,7 @@ class _SearchEntryScreenState extends State<SearchEntryScreen>
     );
   }
 }
+
 
 class _SearchTabBarDelegate extends SliverPersistentHeaderDelegate {
   final Widget child;

@@ -27,7 +27,7 @@ class _CategorySearchSheetState extends State<CategorySearchSheet>
   @override
   void initState() {
     super.initState();
-    _kinds = const ['food', 'sight'];
+    _kinds = const ['food', 'sight', 'events'];
     final initialIndex =
         _kinds.indexOf(widget.initialKind).clamp(0, _kinds.length - 1);
     _tabController = TabController(length: _kinds.length, vsync: this);
@@ -112,6 +112,7 @@ class _CategorySearchSheetState extends State<CategorySearchSheet>
               tabs: const [
                 Tab(text: 'Essen & Trinken'),
                 Tab(text: 'Places'),
+                Tab(text: 'Events'),
               ],
             ),
             SizedBox(height: tokens.space.s8),
@@ -121,6 +122,7 @@ class _CategorySearchSheetState extends State<CategorySearchSheet>
                 children: const [
                   CategoriesView(kind: 'food', showSearchField: false),
                   CategoriesView(kind: 'sight', showSearchField: false),
+                  EventsCategoriesView(showSearchField: false),
                 ],
               ),
             ),
