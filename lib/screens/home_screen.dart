@@ -47,6 +47,8 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Place> _hypePlaces = [];
   bool _isHypeLoading = false;
   bool _isStreamPreviewLoading = false;
+  bool _pendingHypeReload = false;
+  bool _pendingStreamPreviewReload = false;
   bool _isCollabLoading = true;
   bool _isFollowingLoading = true;
   List<Collab> _publicCollabs = [];
@@ -66,6 +68,8 @@ class _HomeScreenState extends State<HomeScreen> {
       _hypeMessageSubscriptions = {};
   final Map<String, List<String>> _hypeMessagesByRoom = {};
   final Map<String, String?> _hypeMediaByRoom = {};
+  Timer? _locationReloadDebounce;
+  static const Duration _locationReloadDelay = Duration(milliseconds: 400);
 
   @override
   void initState() {
@@ -144,7 +148,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadStreamPreviewPlace() async {
-    if (_isStreamPreviewLoading) return;
+    if (_isStreamPreviewLoading) {
+      _pendingStreamPreviewReload = true;
+      return;
+    }
     setState(() {
       _isStreamPreviewLoading = true;
     });
@@ -193,6 +200,10 @@ class _HomeScreenState extends State<HomeScreen> {
           _isStreamPreviewLoading = false;
         });
       }
+      if (_pendingStreamPreviewReload && mounted) {
+        _pendingStreamPreviewReload = false;
+        _loadStreamPreviewPlace();
+      }
     }
   }
 
@@ -205,7 +216,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadHypePlaces() async {
-    if (_isHypeLoading) return;
+    if (_isHypeLoading) {
+      _pendingHypeReload = true;
+      return;
+    }
     setState(() {
       _isHypeLoading = true;
     });
@@ -251,6 +265,10 @@ class _HomeScreenState extends State<HomeScreen> {
         setState(() {
           _isHypeLoading = false;
         });
+      }
+      if (_pendingHypeReload && mounted) {
+        _pendingHypeReload = false;
+        _loadHypePlaces();
       }
     }
   }
@@ -323,14 +341,19 @@ class _HomeScreenState extends State<HomeScreen> {
     for (final sub in _hypeMessageSubscriptions.values) {
       sub.cancel();
     }
+    _locationReloadDebounce?.cancel();
     _locationStore.removeListener(_handleLocationChange);
     _locationStore.dispose();
     super.dispose();
   }
 
   void _handleLocationChange() {
-    _loadStreamPreviewPlace();
-    _loadHypePlaces();
+    _locationReloadDebounce?.cancel();
+    _locationReloadDebounce = Timer(_locationReloadDelay, () {
+      if (!mounted) return;
+      _loadStreamPreviewPlace();
+      _loadHypePlaces();
+    });
   }
 
   void _maybeReloadOnVisibility() {

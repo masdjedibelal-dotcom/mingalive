@@ -28,10 +28,10 @@ class PlaceListTile extends StatelessWidget {
     final tokens = context.tokens;
     final noteText = note?.trim() ?? '';
     final hasNote = noteText.isNotEmpty;
-    final showToggle = hasNote && noteText.length > 120;
-    final previewText = hasNote && !isNoteExpanded
-        ? _truncate(noteText, 120)
-        : noteText;
+    final noteStyle = tokens.type.caption.copyWith(
+      color: tokens.colors.textSecondary,
+      height: 1.3,
+    );
 
     return Material(
       color: tokens.colors.transparent,
@@ -83,32 +83,44 @@ class PlaceListTile extends StatelessWidget {
                     ),
                     if (hasNote) ...[
                       SizedBox(height: tokens.space.s6),
-                      Text(
-                        previewText,
-                        maxLines: isNoteExpanded ? 6 : 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: tokens.type.caption.copyWith(
-                          color: tokens.colors.textSecondary,
-                          height: 1.3,
-                        ),
+                      LayoutBuilder(
+                        builder: (context, constraints) {
+                          final showToggle = _isTextOverflowing(
+                            noteText,
+                            noteStyle,
+                            constraints.maxWidth,
+                            maxLines: isNoteExpanded ? 6 : 2,
+                          );
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                noteText,
+                                maxLines: isNoteExpanded ? 6 : 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: noteStyle,
+                              ),
+                              if (showToggle) ...[
+                                SizedBox(height: tokens.space.s4),
+                                GestureDetector(
+                                  onTap: () => _showNoteSheet(
+                                    context,
+                                    place: place,
+                                    noteText: noteText,
+                                  ),
+                                  child: Text(
+                                    'Mehr anzeigen',
+                                    style: tokens.type.caption.copyWith(
+                                      color: tokens.colors.accent,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          );
+                        },
                       ),
-                      if (showToggle) ...[
-                        SizedBox(height: tokens.space.s4),
-                        GestureDetector(
-                          onTap: () => _showNoteSheet(
-                            context,
-                            place: place,
-                            noteText: noteText,
-                          ),
-                          child: Text(
-                            'Weiterlesen',
-                            style: tokens.type.caption.copyWith(
-                              color: tokens.colors.textPrimary,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      ],
                     ],
                     if (onEditNote != null) ...[
                       SizedBox(height: tokens.space.s6),
@@ -145,9 +157,18 @@ class PlaceListTile extends StatelessWidget {
     return parts.join(' · ');
   }
 
-  String _truncate(String text, int maxChars) {
-    if (text.length <= maxChars) return text;
-    return '${text.substring(0, maxChars).trim()}…';
+  bool _isTextOverflowing(
+    String text,
+    TextStyle style,
+    double maxWidth, {
+    int maxLines = 2,
+  }) {
+    final painter = TextPainter(
+      text: TextSpan(text: text, style: style),
+      maxLines: maxLines,
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: maxWidth);
+    return painter.didExceedMaxLines;
   }
 
   Future<void> _showNoteSheet(

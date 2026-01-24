@@ -49,6 +49,27 @@ class LocationService {
     }
   }
 
+  Stream<AppLocation> watchLocation({int distanceFilterMeters = 80}) async* {
+    final hasPermission = await _hasLocationPermission();
+    if (!hasPermission) return;
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) return;
+
+    final settings = LocationSettings(
+      accuracy: LocationAccuracy.medium,
+      distanceFilter: distanceFilterMeters,
+    );
+    yield* Geolocator.getPositionStream(locationSettings: settings)
+        .map((position) {
+      return AppLocation(
+        label: 'In deiner Nähe',
+        lat: position.latitude,
+        lng: position.longitude,
+        source: AppLocationSource.gps,
+      );
+    });
+  }
+
   Future<LatLng> getOriginOrFallback() async {
     final manual = await _readManualOrigin();
     if (manual != null) {

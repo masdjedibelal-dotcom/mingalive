@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/app_location.dart';
@@ -8,7 +9,11 @@ class LocationStore extends ChangeNotifier {
   LocationStore({LocationService? service})
       : _service = service ?? LocationService();
 
+  static final StreamController<AppLocation> _locationBus =
+      StreamController<AppLocation>.broadcast();
   final LocationService _service;
+  StreamSubscription<AppLocation>? _locationSubscription;
+  StreamSubscription<AppLocation>? _busSubscription;
   AppLocation? _currentLocation;
   bool _manualOverride = false;
   static const _keyLabel = 'location_label';
@@ -37,6 +42,7 @@ class LocationStore extends ChangeNotifier {
       lng: _centerLng,
       source: AppLocationSource.fallback,
     );
+    _subscribeToBus();
     notifyListeners();
 
     await _loadPersistedLocation();
@@ -44,10 +50,10 @@ class LocationStore extends ChangeNotifier {
       _service.getCurrentLocation().then((gpsLocation) {
         if (gpsLocation == null) return;
         if (_manualOverride) return;
-        _currentLocation = gpsLocation;
-        notifyListeners();
+        _applyLocation(gpsLocation, broadcast: true);
       });
     }
+    _startLocationStream();
   }
 
   void setManualLocation(AppLocation location) {
@@ -64,7 +70,9 @@ class LocationStore extends ChangeNotifier {
       );
       _clearPersistedLocation();
     }
+    _stopLocationStream();
     notifyListeners();
+    _broadcastLocation(_currentLocation!);
   }
 
   Future<void> useMyLocation() async {
@@ -83,6 +91,8 @@ class LocationStore extends ChangeNotifier {
       );
     }
     notifyListeners();
+    _broadcastLocation(_currentLocation!);
+    _startLocationStream();
   }
 
   Future<void> _loadPersistedLocation() async {
@@ -102,6 +112,7 @@ class LocationStore extends ChangeNotifier {
         source: AppLocationSource.manual,
       );
       notifyListeners();
+      _stopLocationStream();
     } catch (_) {}
   }
 
@@ -129,6 +140,8 @@ class LocationStore extends ChangeNotifier {
           _manualOverride = true;
           _currentLocation = next;
           notifyListeners();
+          _stopLocationStream();
+          _broadcastLocation(next);
         }
         return;
       }
@@ -148,7 +161,9 @@ class LocationStore extends ChangeNotifier {
           );
         }
         notifyListeners();
+        _broadcastLocation(_currentLocation!);
       }
+      _startLocationStream();
     } catch (_) {}
   }
 
@@ -175,6 +190,95 @@ class LocationStore extends ChangeNotifier {
   bool _isWithinServiceArea(double lat, double lng) {
     final distance = haversineDistanceKm(lat, lng, _centerLat, _centerLng);
     return distance <= _maxDistanceKm;
+  }
+
+  void _subscribeToBus() {
+    _busSubscription ??= _locationBus.stream.listen((location) {
+      final current = _currentLocation;
+      if (current != null && _isSameLocation(current, location)) return;
+      if (_manualOverride && location.source != AppLocationSource.manual) {
+        return;
+      }
+      if (location.source == AppLocationSource.manual) {
+        _manualOverride = true;
+        _stopLocationStream();
+      } else {
+        if (_manualOverride) return;
+        _manualOverride = false;
+      }
+      _currentLocation = location;
+      notifyListeners();
+    });
+  }
+
+  void _broadcastLocation(AppLocation location) {
+    _locationBus.add(location);
+  }
+
+  void _startLocationStream() {
+    if (_manualOverride) return;
+    _locationSubscription?.cancel();
+    _locationSubscription = _service
+        .watchLocation(distanceFilterMeters: 80)
+        .listen((gpsLocation) {
+      if (_manualOverride) return;
+      final next = _normalizeGpsLocation(gpsLocation);
+      final current = _currentLocation;
+      if (current != null && _isSameLocation(current, next)) return;
+      if (current != null &&
+          haversineDistanceKm(
+                current.lat,
+                current.lng,
+                next.lat,
+                next.lng,
+              ) <
+              0.05) {
+        return;
+      }
+      _currentLocation = next;
+      notifyListeners();
+      _broadcastLocation(next);
+    });
+  }
+
+  void _stopLocationStream() {
+    _locationSubscription?.cancel();
+    _locationSubscription = null;
+  }
+
+  AppLocation _normalizeGpsLocation(AppLocation gpsLocation) {
+    if (_isWithinServiceArea(gpsLocation.lat, gpsLocation.lng)) {
+      return gpsLocation;
+    }
+    return const AppLocation(
+      label: 'München Zentrum',
+      lat: _centerLat,
+      lng: _centerLng,
+      source: AppLocationSource.fallback,
+    );
+  }
+
+  AppLocation _applyLocation(AppLocation location, {bool broadcast = false}) {
+    _currentLocation = location;
+    notifyListeners();
+    if (broadcast) {
+      _broadcastLocation(location);
+    }
+    return location;
+  }
+
+  bool _isSameLocation(AppLocation a, AppLocation b) {
+    return a.lat == b.lat &&
+        a.lng == b.lng &&
+        a.label == b.label &&
+        a.source == b.source;
+  }
+
+  @override
+  void dispose() {
+    _stopLocationStream();
+    _busSubscription?.cancel();
+    super.dispose();
   }
 }
 

@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:typed_data';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:cross_file/cross_file.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/painting.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
@@ -615,6 +617,7 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
                   onTap: () {
                     Navigator.of(context).pop();
                     _shareCollabCard(
+                      collabId: collabId,
                       data: data,
                       shareText: shareText,
                     );
@@ -651,6 +654,7 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
                   onTap: () {
                     Navigator.of(context).pop();
                     _shareCollabCard(
+                      collabId: collabId,
                       data: data,
                       shareText: shareUrl,
                       imageOnly: true,
@@ -728,38 +732,101 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
   }
 
   Future<void> _shareCollabCard({
+    required String collabId,
     required _CollabShareData data,
     required String shareText,
     bool imageOnly = false,
   }) async {
     try {
-      final bytes = await _renderShareCard(data);
-      final file = XFile.fromData(
-        bytes,
-        mimeType: 'image/png',
-        name: 'collab-share.png',
+      final places = await _fetchSharePlaces(collabId);
+      final images = await _renderInstagramShareCards(
+        data: data,
+        places: places,
       );
+      final files = images
+          .asMap()
+          .entries
+          .map(
+            (entry) => XFile.fromData(
+              entry.value,
+              mimeType: 'image/png',
+              name: 'collab-share-${entry.key + 1}.png',
+            ),
+          )
+          .toList();
       await Share.shareXFiles(
-        [file],
+        files,
         text: imageOnly ? null : shareText,
       );
     } catch (error) {
       if (kDebugMode) {
         debugPrint('❌ ShareCard render failed: $error');
       }
-      if (!mounted) return;
-      if (!imageOnly) {
-        await Share.share(shareText);
-        return;
+      try {
+        final bytes = await _renderShareCard(data);
+        final file = XFile.fromData(
+          bytes,
+          mimeType: 'image/png',
+          name: 'collab-share.png',
+        );
+        await Share.shareXFiles(
+          [file],
+          text: imageOnly ? null : shareText,
+        );
+      } catch (fallbackError) {
+        if (kDebugMode) {
+          debugPrint('❌ ShareCard fallback failed: $fallbackError');
+        }
+        if (!mounted) return;
+        if (!imageOnly) {
+          await Share.share(shareText);
+          return;
+        }
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Share Card konnte nicht erstellt werden.'),
+            duration: Duration(seconds: 2),
+          ),
+        );
       }
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Share Card konnte nicht erstellt werden.'),
-          duration: Duration(seconds: 2),
-        ),
-      );
     }
+  }
+
+  Future<List<Place>> _fetchSharePlaces(String collabId) async {
+    final collabDefinition = _findCollab(collabId);
+    if (collabDefinition != null) {
+      return _repository.fetchPlacesForCollab(collabDefinition);
+    }
+    final payload = await _fetchSupabasePlacesPayload(collabId);
+    return payload.places;
+  }
+
+  Future<List<Uint8List>> _renderInstagramShareCards({
+    required _CollabShareData data,
+    required List<Place> places,
+  }) async {
+    const pageSize = 5;
+    final chunks = <List<Place>>[];
+    if (places.isEmpty) {
+      chunks.add(const []);
+    } else {
+      for (var i = 0; i < places.length; i += pageSize) {
+        chunks.add(places.sublist(i, math.min(i + pageSize, places.length)));
+      }
+    }
+
+    final images = <Uint8List>[];
+    for (var i = 0; i < chunks.length; i++) {
+      final bytes = await _renderInstagramShareCardPage(
+        data: data,
+        places: chunks[i],
+        pageIndex: i,
+        totalPages: chunks.length,
+      );
+      images.add(bytes);
+    }
+    return images;
   }
 
   Future<Uint8List> _renderShareCard(_CollabShareData data) async {
@@ -862,6 +929,295 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
       });
       await completer.future;
     }
+  }
+
+  Future<Uint8List> _renderInstagramShareCardPage({
+    required _CollabShareData data,
+    required List<Place> places,
+    required int pageIndex,
+    required int totalPages,
+  }) async {
+    const width = 1080.0;
+    const height = 1350.0;
+    const padding = 72.0;
+    const coverHeight = 600.0;
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder, const Rect.fromLTWH(0, 0, width, height));
+
+    final backgroundRect = const Rect.fromLTWH(0, 0, width, height);
+    final backgroundPaint = Paint()
+      ..shader = const LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [
+          Color(0xFF0B0F0C),
+          Color(0xFF0C1F15),
+          Color(0xFF0B0F0C),
+        ],
+      ).createShader(backgroundRect);
+    canvas.drawRect(backgroundRect, backgroundPaint);
+
+    final heroUrl = data.heroImageUrl?.trim();
+    ui.Image? coverImage;
+    if (heroUrl != null && heroUrl.isNotEmpty) {
+      try {
+        coverImage = await _loadNetworkImage(heroUrl);
+      } catch (_) {
+        coverImage = null;
+      }
+    }
+
+    if (coverImage != null) {
+      final coverRect = const Rect.fromLTWH(0, 0, width, coverHeight);
+      paintImage(
+        canvas: canvas,
+        rect: coverRect,
+        image: coverImage,
+        fit: BoxFit.cover,
+        filterQuality: FilterQuality.medium,
+      );
+      final scrimPaint = Paint()
+        ..shader = const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Color(0x33000000),
+            Color(0xCC0B0F0C),
+          ],
+        ).createShader(coverRect);
+      canvas.drawRect(coverRect, scrimPaint);
+    }
+
+    final textWidth = width - (padding * 2);
+    double cursorY = coverImage != null ? coverHeight - 210 : padding;
+
+    final titleStyle = const TextStyle(
+      color: Colors.white,
+      fontSize: 56,
+      fontWeight: FontWeight.w700,
+      height: 1.1,
+    );
+    final titlePainter = TextPainter(
+      text: TextSpan(text: data.title.trim(), style: titleStyle),
+      textDirection: TextDirection.ltr,
+      maxLines: 3,
+      ellipsis: '…',
+    )..layout(maxWidth: textWidth - 24);
+    titlePainter.paint(
+      canvas,
+      Offset(padding + 24, cursorY),
+    );
+    cursorY += titlePainter.height + 14;
+
+    final description = data.description.trim();
+    if (description.isNotEmpty) {
+      final descriptionStyle = const TextStyle(
+        color: Color(0xFFDCE2DD),
+        fontSize: 30,
+        height: 1.35,
+      );
+      final descriptionPainter = TextPainter(
+        text: TextSpan(text: description, style: descriptionStyle),
+        textDirection: TextDirection.ltr,
+        maxLines: 3,
+        ellipsis: '…',
+      )..layout(maxWidth: textWidth);
+      descriptionPainter.paint(canvas, Offset(padding, cursorY));
+      cursorY += descriptionPainter.height + 12;
+    }
+
+    if (coverImage != null) {
+      cursorY = coverHeight + 20;
+    }
+
+    final metaParts = <String>[];
+    if (data.creator.trim().isNotEmpty) {
+      metaParts.add('von ${data.creator.trim()}');
+    }
+    if (data.spotCount != null) {
+      metaParts.add('${data.spotCount} Spots');
+    }
+    final metaText = metaParts.join(' · ');
+    if (metaText.isNotEmpty) {
+      final metaStyle = const TextStyle(
+        color: Color(0xFF8E988F),
+        fontSize: 26,
+        height: 1.3,
+      );
+      final metaPainter = TextPainter(
+        text: TextSpan(text: metaText, style: metaStyle),
+        textDirection: TextDirection.ltr,
+        maxLines: 2,
+        ellipsis: '…',
+      )..layout(maxWidth: textWidth);
+      metaPainter.paint(canvas, Offset(padding, cursorY));
+      cursorY += metaPainter.height + 16;
+    }
+
+    final listTop = cursorY + 6;
+    final listRect = RRect.fromRectAndRadius(
+      Rect.fromLTWH(
+        padding,
+        listTop,
+        width - (padding * 2),
+        height - listTop - padding,
+      ),
+      const Radius.circular(36),
+    );
+    final listPaint = Paint()..color = const Color(0xFF0F1412);
+    canvas.drawRRect(listRect, listPaint);
+
+    final listTitleStyle = const TextStyle(
+      color: Colors.white,
+      fontSize: 30,
+      fontWeight: FontWeight.w600,
+    );
+    final listTitle = TextPainter(
+      text: TextSpan(text: 'Spots', style: listTitleStyle),
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: textWidth);
+    listTitle.paint(canvas, Offset(padding + 28, listTop + 24));
+
+    if (totalPages > 1) {
+      final pageStyle = const TextStyle(
+        color: Color(0xFF96A199),
+        fontSize: 24,
+        fontWeight: FontWeight.w600,
+      );
+      final pageText = TextPainter(
+        text: TextSpan(text: '${pageIndex + 1}/$totalPages', style: pageStyle),
+        textDirection: TextDirection.ltr,
+      )..layout(maxWidth: textWidth);
+      pageText.paint(
+        canvas,
+        Offset(width - padding - 28 - pageText.width, listTop + 28),
+      );
+    }
+
+    double rowY = listTop + 78;
+    final rowHeight = 96.0;
+    final accentPaint = Paint()..color = MingaTheme.accentGreen;
+    if (places.isEmpty) {
+      final emptyPainter = TextPainter(
+        text: const TextSpan(
+          text: 'Keine Spots vorhanden',
+          style: TextStyle(
+            color: Color(0xFF95A39B),
+            fontSize: 24,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout(maxWidth: textWidth - 56);
+      emptyPainter.paint(canvas, Offset(padding + 28, rowY));
+    } else {
+      for (var i = 0; i < places.length; i++) {
+        final place = places[i];
+        final index = (pageIndex * 5) + i + 1;
+        final numberCenter = Offset(padding + 44, rowY + 24);
+        canvas.drawCircle(numberCenter, 22, accentPaint);
+        final numberPainter = TextPainter(
+          text: TextSpan(
+            text: '$index',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          textDirection: TextDirection.ltr,
+          textAlign: TextAlign.center,
+        )..layout(maxWidth: 40);
+        numberPainter.paint(
+          canvas,
+          Offset(
+            numberCenter.dx - (numberPainter.width / 2),
+            numberCenter.dy - (numberPainter.height / 2),
+          ),
+        );
+
+        final namePainter = TextPainter(
+          text: TextSpan(
+            text: place.name.trim(),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 28,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          textDirection: TextDirection.ltr,
+          maxLines: 1,
+          ellipsis: '…',
+        )..layout(maxWidth: width - padding - 140);
+        namePainter.paint(canvas, Offset(padding + 88, rowY));
+
+        final details = _formatShareSpotDetails(place);
+        if (details.isNotEmpty) {
+          final detailsPainter = TextPainter(
+            text: TextSpan(
+              text: details,
+              style: const TextStyle(
+                color: Color(0xFF95A39B),
+                fontSize: 22,
+                height: 1.2,
+              ),
+            ),
+            textDirection: TextDirection.ltr,
+            maxLines: 1,
+            ellipsis: '…',
+          )..layout(maxWidth: width - padding - 140);
+          detailsPainter.paint(canvas, Offset(padding + 88, rowY + 38));
+        }
+
+        if (i < places.length - 1) {
+          final dividerPaint = Paint()
+            ..color = const Color(0xFF1E2622)
+            ..strokeWidth = 1;
+          final lineY = rowY + rowHeight - 16;
+          canvas.drawLine(
+            Offset(padding + 28, lineY),
+            Offset(width - padding - 28, lineY),
+            dividerPaint,
+          );
+        }
+        rowY += rowHeight;
+      }
+    }
+
+    final picture = recorder.endRecording();
+    final image = await picture.toImage(width.toInt(), height.toInt());
+    try {
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      if (byteData == null) {
+        throw StateError('Share card bytes missing');
+      }
+      return byteData.buffer.asUint8List();
+    } finally {
+      image.dispose();
+      coverImage?.dispose();
+    }
+  }
+
+  String _formatShareSpotDetails(Place place) {
+    final parts = <String>[];
+    final category = place.category.trim();
+    if (category.isNotEmpty) {
+      parts.add(category);
+    }
+    final distance = place.distanceKm;
+    if (distance != null) {
+      parts.add('${distance.toStringAsFixed(1)} km');
+    }
+    return parts.join(' · ');
+  }
+
+  Future<ui.Image> _loadNetworkImage(String url) async {
+    final uri = Uri.parse(url);
+    final bundle = NetworkAssetBundle(uri);
+    final data = await bundle.load(url);
+    final codec = await ui.instantiateImageCodec(data.buffer.asUint8List());
+    final frame = await codec.getNextFrame();
+    return frame.image;
   }
 
   void _openCreatorProfile(String userId) {
