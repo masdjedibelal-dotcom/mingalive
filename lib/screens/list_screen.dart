@@ -556,9 +556,6 @@ class _ListScreenState extends State<ListScreen> {
     if (place.category.trim().isNotEmpty) {
       parts.add(place.category);
     }
-    if (place.kind != null && place.kind!.trim().isNotEmpty) {
-      parts.add(place.kind!.trim());
-    }
     if (_isEventPlace(place)) {
       final time = _eventTimeLabel(place);
       if (time.isNotEmpty) {

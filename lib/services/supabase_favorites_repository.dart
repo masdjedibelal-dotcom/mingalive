@@ -162,6 +162,12 @@ class SupabaseFavoritesRepository {
     }
   }
 
+  /// Fetch favorite collab lists for a user
+  Future<List<FavoriteList>> fetchCollabLists({required String userId}) async {
+    final lists = await fetchFavoriteLists(userId: userId);
+    return lists.where((list) => list.isCollab).toList();
+  }
+
   /// Fetch a collab list by title (or collab-prefixed title)
   Future<FavoriteList?> fetchCollabList({required String title}) async {
     if (!SupabaseGate.isEnabled) {
@@ -406,6 +412,25 @@ class SupabaseFavoritesRepository {
       return existing;
     }
 
+    Future<FavoriteList?> _insertList(
+      Map<String, dynamic> payload, {
+      String? fetchTitle,
+    }) async {
+      final supabase = SupabaseGate.client;
+      final response = await supabase
+          .from('favorite_lists')
+          .insert(payload)
+          .select()
+          .maybeSingle();
+      if (response != null) {
+        return FavoriteList.fromJson(response);
+      }
+      if (fetchTitle != null && fetchTitle.isNotEmpty) {
+        return fetchCollabList(title: fetchTitle);
+      }
+      return null;
+    }
+
     try {
       final supabase = SupabaseGate.client;
       final currentUser = supabase.auth.currentUser;
@@ -422,7 +447,10 @@ class SupabaseFavoritesRepository {
         'type': 'collab',
       };
 
-      await supabase.from('favorite_lists').insert(payload);
+      final created = await _insertList(payload, fetchTitle: title);
+      if (created != null) {
+        return created;
+      }
     } catch (e) {
       try {
         final supabase = SupabaseGate.client;
@@ -432,12 +460,18 @@ class SupabaseFavoritesRepository {
         }
 
         final fallbackTitle = _collabTitlePrefix(title);
-        await supabase.from('favorite_lists').insert({
+        final created = await _insertList(
+          {
           'user_id': currentUser.id,
           'title': fallbackTitle,
           'emoji': '✨',
           'is_public': false,
-        });
+          },
+          fetchTitle: fallbackTitle,
+        );
+        if (created != null) {
+          return created;
+        }
       } catch (fallbackError) {
         if (kDebugMode) {
           debugPrint(

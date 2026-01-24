@@ -7,13 +7,18 @@ import '../services/auth_service.dart';
 import '../services/supabase_gate.dart';
 import '../services/supabase_collabs_repository.dart';
 import '../services/supabase_profile_repository.dart';
+import '../services/supabase_favorites_repository.dart';
 import '../data/place_repository.dart';
+import '../data/system_collabs.dart';
+import '../models/collab.dart';
 import 'creator_profile_screen.dart';
 import 'detail_screen.dart';
 import 'main_shell.dart';
 import 'collab_create_screen.dart';
 import 'collab_edit_screen.dart';
 import 'collab_detail_screen.dart';
+import '../widgets/collab_carousel.dart';
+import '../widgets/collab_card.dart';
 import '../widgets/collab_grid.dart';
 import '../widgets/place_grid.dart';
 import '../utils/bottom_nav_padding.dart';
@@ -29,6 +34,8 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   final SupabaseProfileRepository _profileRepository =
       SupabaseProfileRepository();
+  final SupabaseFavoritesRepository _favoritesRepository =
+      SupabaseFavoritesRepository();
   final ImagePicker _imagePicker = ImagePicker();
   final TextEditingController _displayNameController = TextEditingController();
   final TextEditingController _bioController = TextEditingController();
@@ -81,6 +88,72 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
     _profileFuture = _profileRepository.fetchUserProfile(userId);
     _lastUserId = userId;
+  }
+
+  Widget _buildFollowedSystemSection(List<CollabDefinition> collabs) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: CollabCarousel(
+        title: 'Gefolgt',
+        isLoading: false,
+        emptyText: '',
+        onSeeAll: () {},
+        showSeeAll: false,
+        itemCount: collabs.length,
+        itemBuilder: (context, index) {
+          final collab = collabs[index];
+          final collabIds = collabs.map((item) => item.id).toList();
+          final initialIndex = collabIds.indexOf(collab.id);
+          return Padding(
+            padding: EdgeInsets.only(
+              right: index == collabs.length - 1 ? 0 : 16,
+            ),
+            child: CollabCard(
+              title: collab.title,
+              username: collab.creatorName,
+              avatarUrl: collab.creatorAvatarUrl,
+              creatorId: collab.creatorId,
+              creatorBadge: null,
+              mediaUrls: const [],
+              imageUrl: collab.heroImageUrl,
+              gradientKey: collab.gradientKey,
+              onCreatorTap: () {},
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) => CollabDetailScreen(
+                      collabId: collab.id,
+                      collabIds: collabIds,
+                      initialIndex: initialIndex < 0 ? 0 : initialIndex,
+                    ),
+                  ),
+                );
+              },
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Future<List<CollabDefinition>> _fetchFollowedSystemCollabs(
+    String userId,
+  ) async {
+    try {
+      final lists = await _favoritesRepository.fetchCollabLists(userId: userId);
+      if (lists.isEmpty) return [];
+      await SystemCollabsStore.load();
+      final matched = <String, CollabDefinition>{};
+      for (final list in lists) {
+        final collab = SystemCollabsStore.findByTitle(list.collabTitle);
+        if (collab != null) {
+          matched[collab.id] = collab;
+        }
+      }
+      return matched.values.toList();
+    } catch (_) {
+      return [];
+    }
   }
 
   @override
@@ -468,7 +541,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               SizedBox(height: 8),
               SizedBox(height: 20),
-                      FutureBuilder<List<List<Collab>>>(
+                      FutureBuilder<List<dynamic>>(
                         future: Future.wait([
                           collabsRepository.fetchCollabsByOwner(
                             ownerId: currentUser.id,
@@ -479,6 +552,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             isPublic: false,
                           ),
                           collabsRepository.fetchSavedCollabs(userId: currentUser.id),
+                          _fetchFollowedSystemCollabs(currentUser.id),
                         ]),
                         builder: (context, snapshot) {
                           if (snapshot.connectionState == ConnectionState.waiting) {
@@ -500,10 +574,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             );
                           }
 
-                          final results = snapshot.data ?? [[], [], []];
-                          final publicCollabs = results[0];
-                          final privateCollabs = results[1];
-                          final savedCollabs = results[2];
+                          final results = snapshot.data ?? [[], [], [], []];
+                          final publicCollabs = results[0] as List<Collab>;
+                          final privateCollabs = results[1] as List<Collab>;
+                          final savedCollabs = results[2] as List<Collab>;
+                          final followedSystemCollabs =
+                              results[3] as List<CollabDefinition>;
 
                           final allCollabs = [
                             ...publicCollabs,
@@ -660,33 +736,42 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                                 const NeverScrollableScrollPhysics(),
                                           );
                                         case 2:
-                                          return CollabGrid(
-                                            collabs: savedCollabs,
-                                            creatorName: (_) => '',
-                                            creatorAvatarUrl: (_) => null,
-                                            creatorId: (collab) => collab.ownerId,
-                                            saveCounts: saveCounts,
-                                            emptyText:
-                                                'Gespeicherte Collabs sind Sammlungen, denen du folgst.',
-                                            onCollabTap: (collab) =>
-                                                _openCollabDetail(
-                                              savedCollabs,
-                                              savedCollabs.indexOf(collab),
-                                            ),
-                                            onCreatorTap: (collab) {
-                                              Navigator.of(context).push(
-                                                MaterialPageRoute(
-                                                  builder: (context) =>
-                                                      CreatorProfileScreen(
-                                                    userId: collab.ownerId,
-                                                  ),
+                                          return Column(
+                                            children: [
+                                              if (followedSystemCollabs.isNotEmpty)
+                                                _buildFollowedSystemSection(
+                                                  followedSystemCollabs,
                                                 ),
-                                              );
-                                            },
-                                            showEditIcon: (_) => false,
-                                            shrinkWrap: true,
-                                            physics:
-                                                const NeverScrollableScrollPhysics(),
+                                              CollabGrid(
+                                                collabs: savedCollabs,
+                                                creatorName: (_) => '',
+                                                creatorAvatarUrl: (_) => null,
+                                                creatorId: (collab) =>
+                                                    collab.ownerId,
+                                                saveCounts: saveCounts,
+                                                emptyText:
+                                                    'Gespeicherte Collabs sind Sammlungen, denen du folgst.',
+                                                onCollabTap: (collab) =>
+                                                    _openCollabDetail(
+                                                  savedCollabs,
+                                                  savedCollabs.indexOf(collab),
+                                                ),
+                                                onCreatorTap: (collab) {
+                                                  Navigator.of(context).push(
+                                                    MaterialPageRoute(
+                                                      builder: (context) =>
+                                                          CreatorProfileScreen(
+                                                        userId: collab.ownerId,
+                                                      ),
+                                                    ),
+                                                  );
+                                                },
+                                                showEditIcon: (_) => false,
+                                                shrinkWrap: true,
+                                                physics:
+                                                    const NeverScrollableScrollPhysics(),
+                                              ),
+                                            ],
                                           );
                                         case 3:
                                           return FutureBuilder<List<Place>>(

@@ -240,6 +240,15 @@ class _DetailScreenState extends State<DetailScreen> {
     final place = _currentPlace;
     if (place == null) return;
     
+    _messagesSubscription?.cancel();
+    _presenceCountSubscription?.cancel();
+    setState(() {
+      _messages = [];
+      _liveCount = 0;
+      _isLoadingMessages = true;
+      _hasReceivedFirstBatch = false;
+    });
+
     final roomId = place.chatRoomId;
     
     // If using Supabase, ensure room exists
@@ -308,6 +317,16 @@ class _DetailScreenState extends State<DetailScreen> {
           }
         });
       }
+    });
+
+    // Safety timeout: if no batch arrives, stop showing the loader.
+    Future.delayed(const Duration(seconds: 2), () {
+      if (!mounted) return;
+      if (_hasReceivedFirstBatch) return;
+      setState(() {
+        _hasReceivedFirstBatch = true;
+        _isLoadingMessages = false;
+      });
     });
 
     // If openChatOnLoad is true, scroll to chat after first frame

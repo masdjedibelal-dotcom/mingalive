@@ -103,5 +103,18 @@ class SystemCollabsStore {
     }
     return null;
   }
+
+  static CollabDefinition? findByTitle(String title) {
+    final cached = _cache;
+    if (cached == null) return null;
+    final normalized = title.trim().toLowerCase();
+    if (normalized.isEmpty) return null;
+    for (final collab in cached) {
+      if (collab.title.trim().toLowerCase() == normalized) {
+        return collab;
+      }
+    }
+    return null;
+  }
 }
 

@@ -2,7 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'theme.dart';
 import '../services/supabase_collabs_repository.dart';
+import '../data/place_repository.dart';
 import '../models/collab.dart';
+import '../models/place.dart';
+import '../widgets/place_list_tile.dart';
+import '../widgets/glass/glass_bottom_sheet.dart';
+import '../widgets/glass/glass_text_field.dart';
+import '../widgets/glass/glass_button.dart';
+import 'add_spots_to_collab_sheet.dart';
+import 'detail_screen.dart';
+import 'main_shell.dart';
 
 class CollabEditResult {
   final String title;
@@ -37,8 +46,11 @@ class CollabEditScreen extends StatefulWidget {
 }
 
 class _CollabEditScreenState extends State<CollabEditScreen> {
+  static const int _noteMaxChars = 120;
+
   final SupabaseCollabsRepository _collabsRepository =
       SupabaseCollabsRepository();
+  final PlaceRepository _placeRepository = PlaceRepository();
   final ImagePicker _imagePicker = ImagePicker();
   late final TextEditingController _titleController;
   late final TextEditingController _descriptionController;
@@ -46,6 +58,10 @@ class _CollabEditScreenState extends State<CollabEditScreen> {
   List<CollabMediaItem> _mediaItems = [];
   bool _isLoadingMedia = true;
   bool _isUpdatingMedia = false;
+  bool _isLoadingSpots = true;
+  List<Place> _places = [];
+  Map<String, String> _placeNotes = {};
+  final Set<String> _expandedNoteKeys = {};
 
   @override
   void initState() {
@@ -55,6 +71,7 @@ class _CollabEditScreenState extends State<CollabEditScreen> {
         TextEditingController(text: widget.initialDescription);
     _isPublic = widget.initialIsPublic;
     _loadMediaItems();
+    _loadSpots();
   }
 
   @override
@@ -100,6 +117,44 @@ class _CollabEditScreenState extends State<CollabEditScreen> {
       _mediaItems = items;
       _isLoadingMedia = false;
     });
+  }
+
+  Future<void> _loadSpots() async {
+    if (!mounted) return;
+    setState(() {
+      _isLoadingSpots = true;
+    });
+    try {
+      final placeIds = await _collabsRepository.fetchCollabPlaceIds(
+        collabId: widget.collabId,
+      );
+      final notes =
+          await _collabsRepository.fetchCollabPlaceNotes(collabId: widget.collabId);
+      if (placeIds.isEmpty) {
+        if (!mounted) return;
+        setState(() {
+          _places = [];
+          _placeNotes = notes;
+          _isLoadingSpots = false;
+        });
+        return;
+      }
+      final places = await _placeRepository.fetchPlacesByIds(placeIds);
+      final ordered = _orderPlacesByIds(places, placeIds);
+      if (!mounted) return;
+      setState(() {
+        _places = ordered;
+        _placeNotes = notes;
+        _isLoadingSpots = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _places = [];
+        _placeNotes = {};
+        _isLoadingSpots = false;
+      });
+    }
   }
 
   Future<void> _addMedia() async {
@@ -306,6 +361,8 @@ class _CollabEditScreenState extends State<CollabEditScreen> {
           ),
           SizedBox(height: 24),
           _buildMediaSection(),
+          SizedBox(height: 16),
+          _buildSpotsSection(),
         ],
       ),
     );
@@ -406,6 +463,217 @@ class _CollabEditScreenState extends State<CollabEditScreen> {
           ),
       ],
     );
+  }
+
+  Widget _buildSpotsSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text(
+              'Spots',
+              style: MingaTheme.titleSmall,
+            ),
+            const Spacer(),
+            TextButton.icon(
+              onPressed: _showAddSpotsSheet,
+              icon: Icon(Icons.add, color: MingaTheme.accentGreen),
+              label: Text(
+                'Hinzufügen',
+                style: MingaTheme.body.copyWith(
+                  color: MingaTheme.accentGreen,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+        SizedBox(height: 8),
+        if (_isLoadingSpots)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Center(
+              child: CircularProgressIndicator(
+                color: MingaTheme.accentGreen,
+              ),
+            ),
+          )
+        else if (_places.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text(
+              'Füge deine Lieblings‑Spots hinzu.',
+              style: MingaTheme.bodySmall.copyWith(
+                color: MingaTheme.textSubtle,
+              ),
+            ),
+          )
+        else
+          ListView.separated(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: _places.length,
+            separatorBuilder: (_, __) => Divider(
+              color: MingaTheme.borderSubtle,
+              height: 24,
+            ),
+            itemBuilder: (context, index) {
+              final place = _places[index];
+              return PlaceListTile(
+                place: place,
+                note: _placeNotes[place.id],
+                isNoteExpanded:
+                    _expandedNoteKeys.contains(_noteKey(place.id)),
+                onToggleNote: () => _toggleNote(place.id),
+                onEditNote: () => _showPlaceNoteSheet(
+                  placeId: place.id,
+                  initialNote: _placeNotes[place.id],
+                ),
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (context) => DetailScreen(
+                        placeId: place.id,
+                        openPlaceChat: (placeId) {
+                          MainShell.of(context)?.openPlaceChat(placeId);
+                        },
+                      ),
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+      ],
+    );
+  }
+
+  String _noteKey(String placeId) => '${widget.collabId}::$placeId';
+
+  void _toggleNote(String placeId) {
+    final key = _noteKey(placeId);
+    setState(() {
+      if (_expandedNoteKeys.contains(key)) {
+        _expandedNoteKeys.remove(key);
+      } else {
+        _expandedNoteKeys.add(key);
+      }
+    });
+  }
+
+  Future<void> _showPlaceNoteSheet({
+    required String placeId,
+    required String? initialNote,
+  }) async {
+    final controller = TextEditingController(text: initialNote ?? '');
+    final focusNode = FocusNode();
+
+    await showGlassBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      child: Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom + 12,
+        ),
+        child: ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 340),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text('Beschreibung', style: MingaTheme.titleSmall),
+                ),
+                IconButton(
+                  icon: Icon(Icons.close, color: MingaTheme.textSecondary),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ],
+            ),
+            SizedBox(height: 8),
+            GlassTextField(
+              controller: controller,
+              focusNode: focusNode,
+              hintText: 'Kurze Beschreibung zum Spot…',
+              maxLines: 5,
+              keyboardType: TextInputType.multiline,
+              onChanged: (value) {
+                if (value.length <= _noteMaxChars) return;
+                final trimmed = value.substring(0, _noteMaxChars);
+                controller.value = controller.value.copyWith(
+                  text: trimmed,
+                  selection: TextSelection.collapsed(offset: trimmed.length),
+                );
+              },
+            ),
+            SizedBox(height: 8),
+            Text(
+              '${controller.text.length}/$_noteMaxChars',
+              style: MingaTheme.bodySmall.copyWith(color: MingaTheme.textSubtle),
+            ),
+            SizedBox(height: 16),
+            Align(
+              alignment: Alignment.centerRight,
+              child: GlassButton(
+                variant: GlassButtonVariant.primary,
+                label: 'Speichern',
+                onPressed: () async {
+                  final note = controller.text.trim();
+                  try {
+                    await _collabsRepository.updateCollabPlaceNote(
+                      collabId: widget.collabId,
+                      placeId: placeId,
+                      note: note,
+                    );
+                    final updated = Map<String, String>.from(_placeNotes);
+                    if (note.isEmpty) {
+                      updated.remove(placeId);
+                    } else {
+                      updated[placeId] = note;
+                    }
+                    if (!mounted) return;
+                    setState(() {
+                      _placeNotes = updated;
+                    });
+                    Navigator.of(context).pop();
+                  } catch (_) {
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          'Beschreibung konnte nicht gespeichert werden',
+                        ),
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                  }
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+      ),
+    );
+
+    controller.dispose();
+    focusNode.dispose();
+  }
+
+  Future<void> _showAddSpotsSheet() async {
+    final added = await showAddSpotsToCollabSheet(
+      context: context,
+      collabId: widget.collabId,
+    );
+    if (!mounted || !added) return;
+    await _loadSpots();
+  }
+
+  List<Place> _orderPlacesByIds(List<Place> places, List<String> ids) {
+    final map = {for (final place in places) place.id: place};
+    return ids.map((id) => map[id]).whereType<Place>().toList();
   }
 
   Widget _buildMediaThumbnail(CollabMediaItem item) {

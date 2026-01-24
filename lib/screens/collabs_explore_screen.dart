@@ -3,6 +3,7 @@ import 'theme.dart';
 import '../services/auth_service.dart';
 import '../services/supabase_collabs_repository.dart';
 import '../services/supabase_profile_repository.dart';
+import '../services/supabase_favorites_repository.dart';
 import '../services/supabase_gate.dart';
 import '../data/place_repository.dart';
 import '../data/system_collabs.dart';
@@ -34,15 +35,19 @@ class _CollabsExploreScreenState extends State<CollabsExploreScreen> {
       SupabaseCollabsRepository();
   final SupabaseProfileRepository _profileRepository =
       SupabaseProfileRepository();
+  final SupabaseFavoritesRepository _favoritesRepository =
+      SupabaseFavoritesRepository();
   final PlaceRepository _placeRepository = PlaceRepository();
   bool _isLoading = true;
   bool _isSystemLoading = true;
+  bool _isFollowedSystemLoading = true;
   CollabsExploreFilter _activeFilter = CollabsExploreFilter.popular;
   final Map<String, int> _saveCounts = {};
   final Map<String, UserProfile> _creatorProfiles = {};
   List<Collab> _publicCollabs = [];
   List<Collab> _savedCollabs = [];
   List<CollabDefinition> _systemCollabs = [];
+  List<CollabDefinition> _followedSystemCollabs = [];
   final Map<String, List<String>> _fallbackMediaByCollabId = {};
 
   @override
@@ -88,6 +93,10 @@ class _CollabsExploreScreenState extends State<CollabsExploreScreen> {
       );
       _saveCounts.addAll(counts);
       _systemCollabs = await SystemCollabsStore.load();
+      if (currentUser != null) {
+        _followedSystemCollabs =
+            await _loadFollowedSystemCollabs(currentUser.id);
+      }
     } catch (_) {
       // keep defaults on error
     }
@@ -96,10 +105,31 @@ class _CollabsExploreScreenState extends State<CollabsExploreScreen> {
       setState(() {
         _isLoading = false;
         _isSystemLoading = false;
+        _isFollowedSystemLoading = false;
       });
     }
     await _loadFallbackMediaForCollabs();
     await _loadFallbackMediaForSystemCollabs();
+  }
+
+  Future<List<CollabDefinition>> _loadFollowedSystemCollabs(
+    String userId,
+  ) async {
+    try {
+      final lists = await _favoritesRepository.fetchCollabLists(userId: userId);
+      if (lists.isEmpty) return [];
+      await SystemCollabsStore.load();
+      final matched = <String, CollabDefinition>{};
+      for (final list in lists) {
+        final collab = SystemCollabsStore.findByTitle(list.collabTitle);
+        if (collab != null) {
+          matched[collab.id] = collab;
+        }
+      }
+      return matched.values.toList();
+    } catch (_) {
+      return [];
+    }
   }
 
   List<Collab> get _filteredCollabs {
@@ -151,113 +181,126 @@ class _CollabsExploreScreenState extends State<CollabsExploreScreen> {
           const SizedBox(width: 8),
         ],
       ),
-      body: Column(
-        children: [
-          SizedBox(height: 8),
-          _buildSystemCollabSection(),
-          SizedBox(height: 12),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Row(
-              children: [
-                _buildChip(
-                  label: 'Popular',
-                  isSelected: _activeFilter == CollabsExploreFilter.popular,
-                  onTap: () => _setFilter(CollabsExploreFilter.popular),
-                ),
-                SizedBox(width: 8),
-                _buildChip(
-                  label: 'New',
-                  isSelected: _activeFilter == CollabsExploreFilter.newest,
-                  onTap: () => _setFilter(CollabsExploreFilter.newest),
-                ),
-                SizedBox(width: 8),
-                _buildChip(
-                  label: 'Following',
-                  isSelected: _activeFilter == CollabsExploreFilter.following,
-                  onTap: () => _setFilter(CollabsExploreFilter.following),
-                ),
-              ],
+      body: CustomScrollView(
+        slivers: [
+          SliverToBoxAdapter(child: SizedBox(height: 8)),
+          SliverToBoxAdapter(child: _buildSystemCollabSection()),
+          SliverToBoxAdapter(child: SizedBox(height: 12)),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                children: [
+                  _buildChip(
+                    label: 'Popular',
+                    isSelected: _activeFilter == CollabsExploreFilter.popular,
+                    onTap: () => _setFilter(CollabsExploreFilter.popular),
+                  ),
+                  SizedBox(width: 8),
+                  _buildChip(
+                    label: 'New',
+                    isSelected: _activeFilter == CollabsExploreFilter.newest,
+                    onTap: () => _setFilter(CollabsExploreFilter.newest),
+                  ),
+                  SizedBox(width: 8),
+                  _buildChip(
+                    label: 'Following',
+                    isSelected: _activeFilter == CollabsExploreFilter.following,
+                    onTap: () => _setFilter(CollabsExploreFilter.following),
+                  ),
+                ],
+              ),
             ),
           ),
-          SizedBox(height: 12),
-          Expanded(
-            child: _isLoading
-                ? Center(
-                    child: CircularProgressIndicator(
-                      color: MingaTheme.accentGreen,
-                    ),
-                  )
-                : collabs.isEmpty
-                    ? Center(
-                        child: Text(
-                          'Noch keine Collabs verfügbar.',
-                          style: MingaTheme.bodySmall,
-                        ),
-                      )
-                    : GridView.builder(
-                        padding: EdgeInsets.fromLTRB(
-                          16,
-                          8,
-                          16,
-                          bottomNavSafePadding(context),
-                        ),
-                        gridDelegate:
-                            const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          crossAxisSpacing: 12,
-                          mainAxisSpacing: 12,
-                          childAspectRatio: 0.74,
-                        ),
-                        itemCount: collabs.length,
-                        itemBuilder: (context, index) {
-                          final collab = collabs[index];
-                          final profile = _creatorProfiles[collab.ownerId];
-                          final username = profile?.name ?? 'Unbekannt';
-                          final fallbackUrls =
-                              _fallbackMediaByCollabId[collab.id] ?? const [];
-                          final mediaUrls = collab.coverMediaUrls.isNotEmpty
-                              ? collab.coverMediaUrls
-                              : fallbackUrls;
-                          final imageUrl = collab.coverMediaUrls.isNotEmpty
-                              ? null
-                              : (fallbackUrls.isNotEmpty
-                                  ? fallbackUrls.first
-                                  : null);
-                          final collabIds =
-                              collabs.map((item) => item.id).toList();
-                          return CollabCard(
-                            title: collab.title,
-                            username: username,
-                            avatarUrl: profile?.avatar,
-                            creatorId: collab.ownerId,
-                            creatorBadge: profile?.badge,
-                            mediaUrls: mediaUrls,
-                            imageUrl: imageUrl,
-                            gradientKey: 'mint',
-                            onCreatorTap: () {
-                              Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (context) =>
-                                      CreatorProfileScreen(userId: collab.ownerId),
-                                ),
-                              );
-                            },
-                            onTap: () {
-                              Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (context) => CollabDetailScreen(
-                                    collabId: collab.id,
-                                    collabIds: collabIds,
-                                    initialIndex: index,
-                                  ),
-                                ),
-                              );
-                            },
-                          );
-                        },
-                      ),
-          ),
+          SliverToBoxAdapter(child: SizedBox(height: 12)),
+          if (_activeFilter == CollabsExploreFilter.following)
+            SliverToBoxAdapter(
+              child: _buildFollowedSystemCollabSection(),
+            ),
+          if (_activeFilter == CollabsExploreFilter.following)
+            SliverToBoxAdapter(child: SizedBox(height: 12)),
+          if (_isLoading)
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: Center(
+                child: CircularProgressIndicator(
+                  color: MingaTheme.accentGreen,
+                ),
+              ),
+            )
+          else if (collabs.isEmpty)
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: Center(
+                child: Text(
+                  'Noch keine Collabs verfügbar.',
+                  style: MingaTheme.bodySmall,
+                ),
+              ),
+            )
+          else
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(
+                16,
+                8,
+                16,
+                bottomNavSafePadding(context),
+              ),
+              sliver: SliverGrid(
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  crossAxisSpacing: 12,
+                  mainAxisSpacing: 12,
+                  childAspectRatio: 0.74,
+                ),
+                delegate: SliverChildBuilderDelegate(
+                  (context, index) {
+                    final collab = collabs[index];
+                    final profile = _creatorProfiles[collab.ownerId];
+                    final username = profile?.name ?? 'Unbekannt';
+                    final fallbackUrls =
+                        _fallbackMediaByCollabId[collab.id] ?? const [];
+                    final mediaUrls = collab.coverMediaUrls.isNotEmpty
+                        ? collab.coverMediaUrls
+                        : fallbackUrls;
+                    final imageUrl = collab.coverMediaUrls.isNotEmpty
+                        ? null
+                        : (fallbackUrls.isNotEmpty ? fallbackUrls.first : null);
+                    final collabIds = collabs.map((item) => item.id).toList();
+                    return CollabCard(
+                      title: collab.title,
+                      username: username,
+                      avatarUrl: profile?.avatar,
+                      creatorId: collab.ownerId,
+                      creatorBadge: profile?.badge,
+                      mediaUrls: mediaUrls,
+                      imageUrl: imageUrl,
+                      gradientKey: 'mint',
+                      onCreatorTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (context) =>
+                                CreatorProfileScreen(userId: collab.ownerId),
+                          ),
+                        );
+                      },
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (context) => CollabDetailScreen(
+                              collabId: collab.id,
+                              collabIds: collabIds,
+                              initialIndex: index,
+                            ),
+                          ),
+                        );
+                      },
+                    );
+                  },
+                  childCount: collabs.length,
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -350,6 +393,73 @@ class _CollabsExploreScreenState extends State<CollabsExploreScreen> {
               creatorBadge: null,
               mediaUrls: mediaUrls,
               imageUrl: mediaUrls.isNotEmpty ? mediaUrls.first : collab.heroImageUrl,
+              gradientKey: collab.gradientKey,
+              onCreatorTap: () {},
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) => CollabDetailScreen(
+                      collabId: collab.id,
+                      collabIds: collabIds,
+                      initialIndex: initialIndex < 0 ? 0 : initialIndex,
+                    ),
+                  ),
+                );
+              },
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildFollowedSystemCollabSection() {
+    if (_isFollowedSystemLoading) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: CollabCarousel(
+          title: 'Gefolgt',
+          isLoading: true,
+          emptyText: '',
+          onSeeAll: () {},
+          showSeeAll: false,
+          itemCount: 0,
+          itemBuilder: (_, __) => const SizedBox.shrink(),
+        ),
+      );
+    }
+    if (_followedSystemCollabs.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    final items = _followedSystemCollabs;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: CollabCarousel(
+        title: 'Gefolgt',
+        isLoading: false,
+        emptyText: '',
+        onSeeAll: () {},
+        showSeeAll: false,
+        itemCount: items.length,
+        itemBuilder: (context, index) {
+          final collab = items[index];
+          final fallbackUrls = _fallbackMediaByCollabId[collab.id] ?? const [];
+          final mediaUrls = fallbackUrls;
+          final collabIds = items.map((item) => item.id).toList();
+          final initialIndex = collabIds.indexOf(collab.id);
+          return Padding(
+            padding: EdgeInsets.only(
+              right: index == items.length - 1 ? 0 : 16,
+            ),
+            child: CollabCard(
+              title: collab.title,
+              username: collab.creatorName,
+              avatarUrl: collab.creatorAvatarUrl,
+              creatorId: collab.creatorId,
+              creatorBadge: null,
+              mediaUrls: mediaUrls,
+              imageUrl:
+                  mediaUrls.isNotEmpty ? mediaUrls.first : collab.heroImageUrl,
               gradientKey: collab.gradientKey,
               onCreatorTap: () {},
               onTap: () {

@@ -70,6 +70,8 @@ class StreamScreenState extends State<StreamScreen>
   bool _wasVisible = true;
   double? _userLat;
   double? _userLng;
+  String? _userLabel;
+  AppLocationSource? _userSource;
 
   @override
   void initState() {
@@ -687,33 +689,52 @@ class StreamScreenState extends State<StreamScreen>
     final hasLocation = true;
     final nextLat = location.lat;
     final nextLng = location.lng;
+    final nextLabel = location.label;
+    final nextSource = location.source;
+    final prevLabel = _userLabel;
+    final prevSource = _userSource;
 
     debugPrint(
       'USER_LOC lat=$nextLat lng=$nextLng available=$hasLocation source=${location.source}',
     );
 
-    if (!force && nextLat == _userLat && nextLng == _userLng) return;
+    if (!force &&
+        nextLat == _userLat &&
+        nextLng == _userLng &&
+        nextLabel == prevLabel &&
+        nextSource == prevSource) {
+      return;
+    }
 
     final hadLocation = _hasUserLocation;
-    final movedKm = hadLocation
-        ? haversineKm(_userLat!, _userLng!, nextLat, nextLng)
-        : null;
-    final locationChanged =
-        force || hadLocation != hasLocation || (movedKm != null && movedKm > 0.15);
+    final locationChanged = force || hadLocation != hasLocation;
 
     _userLat = nextLat;
     _userLng = nextLng;
+    _userLabel = nextLabel;
+    _userSource = nextSource;
 
-    if (!locationChanged) return;
+    if (!locationChanged &&
+        nextLabel == prevLabel &&
+        nextSource == prevSource) {
+      return;
+    }
     _resortStreamPlaces();
   }
 
   void _resortStreamPlaces() {
     if (!mounted) return;
     if (_poolPlaces.isEmpty) return;
+    setState(() {
+      _isSorting = true;
+    });
     final updated = _applyDistanceAndSort(_poolPlaces);
     _logSortTop5(updated);
     _updateSortedPlaces(updated);
+    if (!mounted) return;
+    setState(() {
+      _isSorting = false;
+    });
   }
 
   void _logSortTop5(List<Place> places) {
@@ -869,7 +890,7 @@ class _StreamChatPaneState extends State<StreamChatPane> {
   StreamSubscription<List<PresenceProfile>>? _presenceRosterSubscription;
   final DraggableScrollableController _sheetController =
       DraggableScrollableController();
-  bool _isSheetExpanded = false;
+  bool _isSheetExpanded = true;
   List<ChatMessage> _messages = [];
   final List<ChatMessage> _systemMessages = [];
   List<RoomMediaPost> _mediaPosts = [];
@@ -956,7 +977,19 @@ class _StreamChatPaneState extends State<StreamChatPane> {
   }
 
   Future<void> _toggleChatSheet() async {
-    final target = _isSheetExpanded ? 0.2 : 0.92;
+    final target = _isSheetExpanded ? 0.2 : 0.75;
+    setState(() {
+      _isSheetExpanded = !_isSheetExpanded;
+    });
+    await _sheetController.animateTo(
+      target,
+      duration: const Duration(milliseconds: 240),
+      curve: Curves.easeOut,
+    );
+  }
+
+  Future<void> _toggleMediaFocus() async {
+    final target = _isSheetExpanded ? 0.2 : 0.75;
     setState(() {
       _isSheetExpanded = !_isSheetExpanded;
     });
@@ -983,14 +1016,20 @@ class _StreamChatPaneState extends State<StreamChatPane> {
             mediaPosts: _mediaPosts,
             liveCount: widget.liveCount,
             borderRadius: BorderRadius.zero,
-            topRightActions: null,
+            topRightActions: IconButton(
+              icon: Icon(
+                _isSheetExpanded ? Icons.open_in_full : Icons.close_fullscreen,
+                color: tokens.colors.textPrimary,
+              ),
+              onPressed: _toggleMediaFocus,
+            ),
             useAspectRatio: false,
             useTopSafeArea: false,
           ),
         ),
         DraggableScrollableSheet(
           controller: _sheetController,
-          initialChildSize: 0.5,
+          initialChildSize: 0.75,
           minChildSize: 0.2,
           maxChildSize: 0.92,
           builder: (context, scrollController) {

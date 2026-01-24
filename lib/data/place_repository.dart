@@ -760,13 +760,17 @@ class PlaceRepository {
         .map((value) => value.toLowerCase())
         .toList();
     return places.where((place) {
-      if (hasKindFilter) {
-        final kind = place.kind?.toLowerCase().trim() ?? '';
-        if (kind.isEmpty || !config.intentKinds.contains(kind)) {
-          return false;
-        }
-      }
+      final kind = place.kind?.toLowerCase().trim() ?? '';
       final category = place.category.toLowerCase();
+      final hasCategoryFilter =
+          config.includeCategories.isNotEmpty || config.excludeCategories.isNotEmpty;
+
+      if (hasKindFilter && kind.isNotEmpty && !config.intentKinds.contains(kind)) {
+        return false;
+      }
+      if (hasKindFilter && kind.isEmpty && !hasCategoryFilter) {
+        return false;
+      }
       if (include.isNotEmpty &&
           !include.any((value) => category.contains(value))) {
         return false;

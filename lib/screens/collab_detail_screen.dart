@@ -104,6 +104,7 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
   final Map<String, Map<String, String>> _localNotesByCollabId = {};
   final Map<String, Map<String, String>> _supabaseNotesByCollabId = {};
   final Set<String> _expandedNoteKeys = {};
+  final Set<String> _expandedDescriptionIds = {};
   bool _isSystemLoading = true;
   final Map<String, List<String>> _fallbackMediaByCollabId = {};
 
@@ -146,7 +147,10 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
           ),
         ],
       ),
-      body: _buildCollabContent(_collabIds[_currentIndex]),
+      body: ColoredBox(
+        color: MingaTheme.background,
+        child: _buildCollabContent(_collabIds[_currentIndex]),
+      ),
     );
   }
 
@@ -263,13 +267,7 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
                       SizedBox(height: 8),
                       _buildCreatorRow(collab),
                       SizedBox(height: 6),
-                      Text(
-                        description,
-                        style: MingaTheme.textMuted.copyWith(
-                          color: MingaTheme.textSecondary,
-                          fontSize: 14,
-                        ),
-                      ),
+                      _buildDescriptionText(collabId, description),
                     ],
                   ),
                 ),
@@ -316,6 +314,50 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildDescriptionText(String collabId, String description) {
+    final trimmed = description.trim();
+    if (trimmed.isEmpty) return const SizedBox.shrink();
+    final isExpanded = _expandedDescriptionIds.contains(collabId);
+    final canExpand = trimmed.length > 140;
+    final textStyle = MingaTheme.textMuted.copyWith(
+      color: MingaTheme.textSecondary,
+      fontSize: 14,
+      height: 1.35,
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          trimmed,
+          style: textStyle,
+          maxLines: isExpanded ? 6 : 2,
+          overflow: TextOverflow.ellipsis,
+        ),
+        if (canExpand) ...[
+          const SizedBox(height: 4),
+          GestureDetector(
+            onTap: () {
+              setState(() {
+                if (isExpanded) {
+                  _expandedDescriptionIds.remove(collabId);
+                } else {
+                  _expandedDescriptionIds.add(collabId);
+                }
+              });
+            },
+            child: Text(
+              isExpanded ? 'Weniger' : 'Mehr anzeigen',
+              style: MingaTheme.bodySmall.copyWith(
+                color: MingaTheme.accentGreen,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ],
     );
   }
 
@@ -652,29 +694,35 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
     );
     overlay.insert(entry);
     await WidgetsBinding.instance.endOfFrame;
-    await Future.delayed(const Duration(milliseconds: 32));
+    await Future.delayed(const Duration(milliseconds: 48));
     await WidgetsBinding.instance.endOfFrame;
 
-    final boundaryContext = key.currentContext;
-    if (boundaryContext == null) {
+    try {
+      final boundaryContext = key.currentContext;
+      if (boundaryContext == null) {
+        throw StateError('Share card context missing');
+      }
+      final renderObject = boundaryContext.findRenderObject();
+      if (renderObject is! RenderRepaintBoundary) {
+        throw StateError('Share card boundary missing');
+      }
+      await _waitForPaint(renderObject);
+      if (renderObject.debugNeedsPaint) {
+        await Future.delayed(const Duration(milliseconds: 32));
+        await WidgetsBinding.instance.endOfFrame;
+        await _waitForPaint(renderObject);
+      }
+      final pixelRatio =
+          MediaQuery.of(context).devicePixelRatio.clamp(2.0, 3.0);
+      final image = await renderObject.toImage(pixelRatio: pixelRatio);
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      if (byteData == null) {
+        throw StateError('Share card image bytes missing');
+      }
+      return byteData.buffer.asUint8List();
+    } finally {
       entry.remove();
-      throw StateError('Share card context missing');
     }
-    final boundary =
-        boundaryContext.findRenderObject() as RenderRepaintBoundary;
-    await _waitForPaint(boundary);
-    if (boundary.debugNeedsPaint) {
-      await Future.delayed(const Duration(milliseconds: 16));
-      await WidgetsBinding.instance.endOfFrame;
-      await _waitForPaint(boundary);
-    }
-    final image = await boundary.toImage(pixelRatio: 3);
-    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-    entry.remove();
-    if (byteData == null) {
-      throw StateError('Share card image bytes missing');
-    }
-    return byteData.buffer.asUint8List();
   }
 
   Future<void> _waitForPaint(RenderRepaintBoundary boundary) async {
@@ -932,12 +980,9 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
                       ),
                       if ((collab.description ?? '').trim().isNotEmpty) ...[
                         SizedBox(height: 6),
-                        Text(
+                        _buildDescriptionText(
+                          collabId,
                           collab.description!.trim(),
-                          style: MingaTheme.textMuted.copyWith(
-                            color: MingaTheme.textSecondary,
-                            fontSize: 14,
-                          ),
                         ),
                       ],
                     ],
