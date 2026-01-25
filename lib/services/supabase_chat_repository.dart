@@ -1854,6 +1854,48 @@ class SupabaseChatRepository {
     }
   }
 
+  /// Fetch latest message per room (text-only) for quick previews.
+  Future<Map<String, ChatMessage>> fetchLatestMessages(
+    List<String> roomIds,
+  ) async {
+    if (!SupabaseGate.isEnabled || roomIds.isEmpty) {
+      return {};
+    }
+
+    try {
+      final supabase = SupabaseGate.client;
+      final now = DateTime.now();
+      final todayStart = DateTime(now.year, now.month, now.day);
+      final todayStartIso = todayStart.toIso8601String();
+
+      final response = await supabase
+          .from('messages')
+          .select(
+            'id, room_id, user_id, user_name, user_avatar, text, media_url, created_at',
+          )
+          .inFilter('room_id', roomIds)
+          .gte('created_at', todayStartIso)
+          .order('created_at', ascending: false)
+          .limit(roomIds.length * 3);
+
+      final latestByRoom = <String, ChatMessage>{};
+      for (final row in response as List) {
+        final map = Map<String, dynamic>.from(row);
+        final roomId = map['room_id'] as String?;
+        if (roomId == null) continue;
+        if (latestByRoom.containsKey(roomId)) continue;
+        latestByRoom[roomId] = ChatMessage.fromJson(map);
+      }
+
+      return latestByRoom;
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ SupabaseChatRepository: Failed to fetch latest messages: $e');
+      }
+      return {};
+    }
+  }
+
   /// Fetch activity stats for rooms within a time window.
   Future<Map<String, RoomActivityStats>> fetchRoomActivityStats(
     List<String> roomIds,

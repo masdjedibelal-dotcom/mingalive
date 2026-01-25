@@ -109,5 +109,46 @@ class EventRepository {
       return [];
     }
   }
+
+  Future<List<Event>> searchFutureEvents({
+    required String query,
+  }) async {
+    if (!SupabaseGate.isEnabled) return [];
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) return [];
+    final nowUtc = DateTime.now().toUtc().toIso8601String();
+    try {
+      final response = await SupabaseGate.client
+          .from('events')
+          .select()
+          .eq('is_public', true)
+          .eq('is_cancelled', false)
+          .gte('start_datetime', nowUtc)
+          .or(
+            'title.ilike.%$trimmed%,description.ilike.%$trimmed%,venue_name.ilike.%$trimmed%',
+          )
+          .order('start_datetime', ascending: true);
+      final rows = (response as List).whereType<Map<String, dynamic>>().toList();
+      final now = DateTime.now();
+      final events = rows.map(Event.fromSupabase).where((event) {
+        if (event.isCancelled || !event.isPublic) return false;
+        return !event.isExpired(now);
+      }).toList();
+      events.sort((a, b) {
+        final aStart = a.effectiveStart;
+        final bStart = b.effectiveStart;
+        if (aStart == null && bStart == null) return 0;
+        if (aStart == null) return 1;
+        if (bStart == null) return -1;
+        return aStart.compareTo(bStart);
+      });
+      return events;
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('⚠️ EventRepository: searchFutureEvents failed: $e');
+      }
+      return [];
+    }
+  }
 }
 

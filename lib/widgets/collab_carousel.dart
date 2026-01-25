@@ -4,20 +4,26 @@ import '../theme/app_theme_extensions.dart';
 
 class CollabCarousel extends StatelessWidget {
   final String title;
+  final String? subtitle;
+  final IconData? titleIcon;
   final bool isLoading;
   final String emptyText;
   final VoidCallback onSeeAll;
   final bool showSeeAll;
+  final double height;
   final int itemCount;
   final IndexedWidgetBuilder itemBuilder;
 
   const CollabCarousel({
     super.key,
     required this.title,
+    this.subtitle,
+    this.titleIcon,
     required this.isLoading,
     required this.emptyText,
     required this.onSeeAll,
     this.showSeeAll = true,
+    this.height = 260,
     required this.itemCount,
     required this.itemBuilder,
   });
@@ -29,7 +35,16 @@ class CollabCarousel extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
+            if (titleIcon != null) ...[
+              Icon(
+                titleIcon,
+                size: 18,
+                color: tokens.colors.textSecondary,
+              ),
+              SizedBox(width: tokens.space.s6),
+            ],
             Expanded(
               child: Text(
                 title,
@@ -57,10 +72,19 @@ class CollabCarousel extends StatelessWidget {
               ),
           ],
         ),
+        if (subtitle != null && subtitle!.trim().isNotEmpty) ...[
+          SizedBox(height: tokens.space.s4),
+          Text(
+            subtitle!,
+            style: tokens.type.body.copyWith(
+              color: tokens.colors.textMuted,
+            ),
+          ),
+        ],
         SizedBox(height: tokens.space.s12),
         if (isLoading)
           SizedBox(
-            height: 260,
+            height: height,
             child: Center(
               child: CircularProgressIndicator(
                 color: tokens.colors.accent,
@@ -69,7 +93,7 @@ class CollabCarousel extends StatelessWidget {
           )
         else if (itemCount == 0)
           SizedBox(
-            height: 120,
+            height: height,
             child: Center(
               child: Text(
                 emptyText,
@@ -81,7 +105,7 @@ class CollabCarousel extends StatelessWidget {
           )
         else
           SizedBox(
-            height: 260,
+            height: height,
             child: ListView.builder(
               scrollDirection: Axis.horizontal,
               physics: const BouncingScrollPhysics(),

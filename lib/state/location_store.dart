@@ -60,7 +60,7 @@ class LocationStore extends ChangeNotifier {
     _manualOverride = true;
     if (_isWithinServiceArea(location.lat, location.lng)) {
       _currentLocation = location;
-      _persistManualLocation(location);
+      _clearPersistedLocation();
     } else {
       _currentLocation = const AppLocation(
         label: 'München Zentrum',
@@ -100,19 +100,7 @@ class LocationStore extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       final isManual = prefs.getBool(_keyManual) ?? false;
       if (!isManual) return;
-      final label = prefs.getString(_keyLabel);
-      final lat = prefs.getDouble(_keyLat);
-      final lng = prefs.getDouble(_keyLng);
-      if (label == null || lat == null || lng == null) return;
-      _manualOverride = true;
-      _currentLocation = AppLocation(
-        label: label,
-        lat: lat,
-        lng: lng,
-        source: AppLocationSource.manual,
-      );
-      notifyListeners();
-      _stopLocationStream();
+      await _clearPersistedLocation();
     } catch (_) {}
   }
 
@@ -147,33 +135,23 @@ class LocationStore extends ChangeNotifier {
       }
 
       if (_manualOverride) {
-        _manualOverride = false;
-        final gpsLocation = await _service.getCurrentLocation();
-        if (gpsLocation != null &&
-            _isWithinServiceArea(gpsLocation.lat, gpsLocation.lng)) {
-          _currentLocation = gpsLocation;
-        } else {
-          _currentLocation = const AppLocation(
-            label: 'München Zentrum',
-            lat: _centerLat,
-            lng: _centerLng,
-            source: AppLocationSource.fallback,
-          );
-        }
-        notifyListeners();
-        _broadcastLocation(_currentLocation!);
+        return;
       }
+      final gpsLocation = await _service.getCurrentLocation();
+      if (gpsLocation != null &&
+          _isWithinServiceArea(gpsLocation.lat, gpsLocation.lng)) {
+        _currentLocation = gpsLocation;
+      } else {
+        _currentLocation = const AppLocation(
+          label: 'München Zentrum',
+          lat: _centerLat,
+          lng: _centerLng,
+          source: AppLocationSource.fallback,
+        );
+      }
+      notifyListeners();
+      _broadcastLocation(_currentLocation!);
       _startLocationStream();
-    } catch (_) {}
-  }
-
-  Future<void> _persistManualLocation(AppLocation location) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool(_keyManual, true);
-      await prefs.setString(_keyLabel, location.label);
-      await prefs.setDouble(_keyLat, location.lat);
-      await prefs.setDouble(_keyLng, location.lng);
     } catch (_) {}
   }
 

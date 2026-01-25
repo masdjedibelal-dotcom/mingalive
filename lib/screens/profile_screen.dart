@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:image_picker/image_picker.dart';
 import 'theme.dart';
 import '../models/app_user.dart';
@@ -268,13 +269,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Image.network(
-                  'https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg',
-                  width: 24,
-                  height: 24,
-                  errorBuilder: (context, error, stackTrace) {
-                    return Icon(Icons.login, size: 24);
-                  },
+                FaIcon(
+                  FontAwesomeIcons.google,
+                  size: 22,
+                  color: MingaTheme.buttonLightForeground,
                 ),
                 SizedBox(width: 12),
                 Text('Login mit Google', style: MingaTheme.body),

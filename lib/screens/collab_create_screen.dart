@@ -7,6 +7,10 @@ import '../models/place.dart';
 import '../services/supabase_collabs_repository.dart';
 import '../services/auth_service.dart';
 import '../widgets/place_image.dart';
+import '../widgets/place_list_tile.dart';
+import '../widgets/glass/glass_bottom_sheet.dart';
+import '../widgets/glass/glass_text_field.dart';
+import '../widgets/glass/glass_button.dart';
 
 class CollabCreateScreen extends StatefulWidget {
   const CollabCreateScreen({super.key});
@@ -16,6 +20,8 @@ class CollabCreateScreen extends StatefulWidget {
 }
 
 class _CollabCreateScreenState extends State<CollabCreateScreen> {
+  static const int _noteMaxChars = 120;
+
   final SupabaseCollabsRepository _collabsRepository =
       SupabaseCollabsRepository();
   final PlaceRepository _placeRepository = PlaceRepository();
@@ -27,12 +33,28 @@ class _CollabCreateScreenState extends State<CollabCreateScreen> {
   final List<_PendingMedia> _pendingMedia = [];
   bool _isUploadingMedia = false;
   List<Place> _selectedPlaces = [];
+  Map<String, String> _placeNotes = {};
+  final Set<String> _expandedNoteKeys = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _titleController.addListener(_onPreviewChanged);
+    _descriptionController.addListener(_onPreviewChanged);
+  }
 
   @override
   void dispose() {
+    _titleController.removeListener(_onPreviewChanged);
+    _descriptionController.removeListener(_onPreviewChanged);
     _titleController.dispose();
     _descriptionController.dispose();
     super.dispose();
+  }
+
+  void _onPreviewChanged() {
+    if (!mounted) return;
+    setState(() {});
   }
 
   Future<void> _save() async {
@@ -88,6 +110,18 @@ class _CollabCreateScreenState extends State<CollabCreateScreen> {
       }
     }
 
+    if (collab != null && _placeNotes.isNotEmpty) {
+      for (final entry in _placeNotes.entries) {
+        final note = entry.value.trim();
+        if (note.isEmpty) continue;
+        await _collabsRepository.updateCollabPlaceNote(
+          collabId: collab.id,
+          placeId: entry.key,
+          note: note,
+        );
+      }
+    }
+
     if (!mounted) return;
     setState(() {
       _isSaving = false;
@@ -135,6 +169,8 @@ class _CollabCreateScreenState extends State<CollabCreateScreen> {
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
+          _buildCollabPreview(),
+          SizedBox(height: 16),
           GlassSurface(
             radius: 16,
             blurSigma: 16,
@@ -212,6 +248,139 @@ class _CollabCreateScreenState extends State<CollabCreateScreen> {
     );
   }
 
+  Widget _buildCollabPreview() {
+    final title = _titleController.text.trim();
+    final description = _descriptionController.text.trim();
+    final spotCount = _selectedPlaces.length;
+    return GlassSurface(
+      radius: 18,
+      blurSigma: 18,
+      overlayColor: MingaTheme.glassOverlayXSoft,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: MingaTheme.glassOverlaySoft,
+                    borderRadius: BorderRadius.circular(MingaTheme.radiusSm),
+                  ),
+                  child: Text(
+                    'Vorschau',
+                    style: MingaTheme.bodySmall.copyWith(
+                      color: MingaTheme.textSecondary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                const Spacer(),
+                if (_pendingMedia.length > 1)
+                  Text(
+                    '1/${_pendingMedia.length}',
+                    style: MingaTheme.bodySmall.copyWith(
+                      color: MingaTheme.textSubtle,
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Stack(
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(MingaTheme.radiusSm),
+                      child: SizedBox(
+                        width: 72,
+                        height: 96,
+                        child: _pendingMedia.isNotEmpty
+                            ? _buildPendingThumbnail(_pendingMedia.first)
+                            : Container(
+                                color: MingaTheme.glassOverlaySoft,
+                                child: Icon(
+                                  Icons.collections,
+                                  color: MingaTheme.textSubtle,
+                                ),
+                              ),
+                      ),
+                    ),
+                    if (_pendingMedia.length > 1)
+                      Positioned(
+                        right: 6,
+                        top: 6,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: MingaTheme.darkOverlayMedium,
+                            borderRadius:
+                                BorderRadius.circular(MingaTheme.radiusSm),
+                          ),
+                          child: Text(
+                            '+${_pendingMedia.length - 1}',
+                            style: MingaTheme.bodySmall.copyWith(
+                              color: MingaTheme.textPrimary,
+                              fontSize: 10,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                    title.isEmpty ? 'Deine Collab' : title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: MingaTheme.titleSmall.copyWith(
+                          color: MingaTheme.textPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        description.isEmpty
+                            ? 'Kurze Beschreibung deiner Liste.'
+                            : description,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: MingaTheme.bodySmall.copyWith(
+                          color: MingaTheme.textSubtle,
+                          height: 1.3,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        spotCount == 0
+                            ? 'Noch keine Spots'
+                            : '$spotCount Spots',
+                        style: MingaTheme.bodySmall.copyWith(
+                          color: MingaTheme.textSecondary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildMediaSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -243,7 +412,7 @@ class _CollabCreateScreenState extends State<CollabCreateScreen> {
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 12),
             child: Text(
-              'Füge bis zu 5 Medien hinzu, um dein Collab visuell zu gestalten.',
+              'Bis zu 5 Medien für das Cover.',
               style: MingaTheme.bodySmall.copyWith(
                 color: MingaTheme.textSubtle,
               ),
@@ -328,40 +497,160 @@ class _CollabCreateScreenState extends State<CollabCreateScreen> {
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 8),
             child: Text(
-              'Füge deine Lieblings‑Spots hinzu (optional).',
+              'Lieblings‑Spots hinzufügen (optional).',
               style: MingaTheme.bodySmall.copyWith(
                 color: MingaTheme.textSubtle,
               ),
             ),
           )
-        else
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: _selectedPlaces.map((place) {
-              return InputChip(
-                label: Text(place.name),
-                onDeleted: () => _removeSelectedPlace(place.id),
-                deleteIconColor: MingaTheme.textPrimary,
-                backgroundColor: MingaTheme.glassOverlaySoft,
-                labelStyle: MingaTheme.bodySmall.copyWith(
-                  color: MingaTheme.textPrimary,
-                  fontWeight: FontWeight.w600,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(MingaTheme.radiusSm),
+        else ...[
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(
+              'Reihenfolge per Drag anpassen.',
+              style: MingaTheme.bodySmall.copyWith(
+                color: MingaTheme.textSubtle,
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(
+              'Tipp: Füge pro Spot eine kurze Beschreibung hinzu.',
+              style: MingaTheme.bodySmall.copyWith(
+                color: MingaTheme.textSubtle,
+              ),
+            ),
+          ),
+          ReorderableListView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: _selectedPlaces.length,
+            onReorder: _reorderSelectedPlaces,
+            itemBuilder: (context, index) {
+              final place = _selectedPlaces[index];
+              return Container(
+                key: ValueKey(place.id),
+                margin: const EdgeInsets.only(bottom: 12),
+                child: PlaceListTile(
+                  place: place,
+                  note: _placeNotes[place.id],
+                  isNoteExpanded: _expandedNoteKeys.contains(_noteKey(place.id)),
+                  onToggleNote: () => _toggleNote(place.id),
+                  onEditNote: () => _showPlaceNoteSheet(
+                    placeId: place.id,
+                    initialNote: _placeNotes[place.id],
+                  ),
+                  onTap: () {},
                 ),
               );
-            }).toList(),
+            },
           ),
+        ],
       ],
     );
   }
 
-  void _removeSelectedPlace(String placeId) {
+  String _noteKey(String placeId) => 'create::$placeId';
+
+  void _toggleNote(String placeId) {
+    final key = _noteKey(placeId);
     setState(() {
-      _selectedPlaces =
-          _selectedPlaces.where((place) => place.id != placeId).toList();
+      if (_expandedNoteKeys.contains(key)) {
+        _expandedNoteKeys.remove(key);
+      } else {
+        _expandedNoteKeys.add(key);
+      }
+    });
+  }
+
+  Future<void> _showPlaceNoteSheet({
+    required String placeId,
+    required String? initialNote,
+  }) async {
+    final controller = TextEditingController(text: initialNote ?? '');
+    final focusNode = FocusNode();
+
+    await showGlassBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      child: Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom + 12,
+        ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 340),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text('Beschreibung', style: MingaTheme.titleSmall),
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.close, color: MingaTheme.textSecondary),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                ],
+              ),
+              SizedBox(height: 8),
+              GlassTextField(
+                controller: controller,
+                focusNode: focusNode,
+                hintText: 'Kurze Beschreibung zum Spot…',
+                maxLines: 5,
+                keyboardType: TextInputType.multiline,
+                onChanged: (value) {
+                  if (value.length <= _noteMaxChars) return;
+                  final trimmed = value.substring(0, _noteMaxChars);
+                  controller.value = controller.value.copyWith(
+                    text: trimmed,
+                    selection: TextSelection.collapsed(offset: trimmed.length),
+                  );
+                },
+              ),
+              SizedBox(height: 8),
+              Text(
+                '${controller.text.length}/$_noteMaxChars',
+                style: MingaTheme.bodySmall.copyWith(color: MingaTheme.textSubtle),
+              ),
+              SizedBox(height: 16),
+              Align(
+                alignment: Alignment.centerRight,
+                child: GlassButton(
+                  variant: GlassButtonVariant.primary,
+                  label: 'Speichern',
+                  onPressed: () {
+                    final note = controller.text.trim();
+                    setState(() {
+                      if (note.isEmpty) {
+                        _placeNotes.remove(placeId);
+                      } else {
+                        _placeNotes[placeId] = note;
+                      }
+                    });
+                    Navigator.of(context).pop();
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    controller.dispose();
+    focusNode.dispose();
+  }
+
+  void _reorderSelectedPlaces(int oldIndex, int newIndex) {
+    setState(() {
+      if (newIndex > oldIndex) {
+        newIndex -= 1;
+      }
+      final item = _selectedPlaces.removeAt(oldIndex);
+      _selectedPlaces.insert(newIndex, item);
     });
   }
 
@@ -377,11 +666,15 @@ class _CollabCreateScreenState extends State<CollabCreateScreen> {
       return;
     }
 
-    final places =
+    final favoritePlaces =
         await _placeRepository.fetchFavorites(userId: currentUser.id);
     if (!mounted) return;
 
     final selectedIds = _selectedPlaces.map((place) => place.id).toSet();
+    final favoriteIds = favoritePlaces.map((place) => place.id).toSet();
+    var searchResults = <Place>[];
+    var isSearching = false;
+    var searchToken = 0;
     final result = await showModalBottomSheet<Set<String>>(
       context: context,
       isScrollControlled: true,
@@ -393,13 +686,30 @@ class _CollabCreateScreenState extends State<CollabCreateScreen> {
         final searchController = TextEditingController();
         return StatefulBuilder(
           builder: (context, setModalState) {
+            Future<void> runSearch(String query) async {
+              final trimmed = query.trim();
+              searchToken += 1;
+              final token = searchToken;
+              if (trimmed.isEmpty) {
+                setModalState(() {
+                  searchResults = [];
+                  isSearching = false;
+                });
+                return;
+              }
+              setModalState(() {
+                isSearching = true;
+              });
+              final results = await _placeRepository.search(query: trimmed);
+              if (token != searchToken) return;
+              setModalState(() {
+                searchResults = results;
+                isSearching = false;
+              });
+            }
+
             final query = searchController.text.trim().toLowerCase();
-            final filtered = query.isEmpty
-                ? places
-                : places.where((place) {
-                    return place.name.toLowerCase().contains(query) ||
-                        place.category.toLowerCase().contains(query);
-                  }).toList();
+            final filtered = query.isEmpty ? favoritePlaces : searchResults;
 
             return SafeArea(
               top: false,
@@ -436,7 +746,7 @@ class _CollabCreateScreenState extends State<CollabCreateScreen> {
                       controller: searchController,
                       style: MingaTheme.body,
                       decoration: InputDecoration(
-                        hintText: 'Suche in deinen gespeicherten Orten',
+                        hintText: 'Suche nach Titel, Kategorie oder Straße',
                         hintStyle: MingaTheme.bodySmall.copyWith(
                           color: MingaTheme.textSubtle,
                         ),
@@ -450,79 +760,117 @@ class _CollabCreateScreenState extends State<CollabCreateScreen> {
                           borderSide: BorderSide.none,
                         ),
                       ),
-                      onChanged: (_) => setModalState(() {}),
+                      onChanged: (value) => runSearch(value),
                     ),
                     SizedBox(height: 12),
                     Flexible(
-                      child: filtered.isEmpty
+                      child: isSearching
                           ? Center(
-                              child: Text(
-                                'Keine gespeicherten Spots gefunden.',
-                                style: MingaTheme.bodySmall.copyWith(
-                                  color: MingaTheme.textSubtle,
-                                ),
+                              child: CircularProgressIndicator(
+                                color: MingaTheme.accentGreen,
+                                strokeWidth: 2,
                               ),
                             )
-                          : ListView.builder(
-                              shrinkWrap: true,
-                              itemCount: filtered.length,
-                              itemBuilder: (context, index) {
-                                final place = filtered[index];
-                                final isSelected =
-                                    selectedIds.contains(place.id);
-                                return ListTile(
-                                  contentPadding: EdgeInsets.zero,
-                                  leading: ClipRRect(
-                                    borderRadius: BorderRadius.circular(
-                                      MingaTheme.radiusSm,
-                                    ),
-                                    child: SizedBox(
-                                      width: 46,
-                                      height: 46,
-                                      child: PlaceImage(
-                                        imageUrl: place.imageUrl,
-                                        fit: BoxFit.cover,
-                                      ),
-                                    ),
-                                  ),
-                                  title: Text(
-                                    place.name,
-                                    style: MingaTheme.bodySmall.copyWith(
-                                      color: MingaTheme.textPrimary,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                  subtitle: Text(
-                                    place.category,
+                          : filtered.isEmpty
+                              ? Center(
+                                  child: Text(
+                                    query.isEmpty
+                                        ? 'Keine gespeicherten Spots gefunden.'
+                                        : 'Keine Ergebnisse gefunden.',
                                     style: MingaTheme.bodySmall.copyWith(
                                       color: MingaTheme.textSubtle,
                                     ),
                                   ),
-                                  trailing: Checkbox(
-                                    value: isSelected,
-                                    activeColor: MingaTheme.accentGreen,
-                                    onChanged: (value) {
-                                      setModalState(() {
-                                        if (value == true) {
-                                          selectedIds.add(place.id);
-                                        } else {
-                                          selectedIds.remove(place.id);
+                                )
+                              : ListView.builder(
+                                  shrinkWrap: true,
+                                  itemCount: filtered.length,
+                                  itemBuilder: (context, index) {
+                                    final place = filtered[index];
+                                    final isSelected =
+                                        selectedIds.contains(place.id);
+                                    final isFavorite =
+                                        favoriteIds.contains(place.id);
+                                    final subtitleParts = <String>[
+                                      place.category,
+                                      if (place.address != null &&
+                                          place.address!.trim().isNotEmpty)
+                                        place.address!.trim(),
+                                      if (!isFavorite) 'Aus Suche',
+                                    ];
+                                    return ListTile(
+                                      contentPadding: EdgeInsets.zero,
+                                      leading: ClipRRect(
+                                        borderRadius: BorderRadius.circular(
+                                          MingaTheme.radiusSm,
+                                        ),
+                                        child: SizedBox(
+                                          width: 46,
+                                          height: 46,
+                                          child: PlaceImage(
+                                            imageUrl: place.imageUrl,
+                                            fit: BoxFit.cover,
+                                          ),
+                                        ),
+                                      ),
+                                      title: Text(
+                                        place.name,
+                                        style: MingaTheme.bodySmall.copyWith(
+                                          color: MingaTheme.textPrimary,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      subtitle: Text(
+                                        subtitleParts.join(' · '),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: MingaTheme.bodySmall.copyWith(
+                                          color: MingaTheme.textSubtle,
+                                        ),
+                                      ),
+                                      trailing: Checkbox(
+                                        value: isSelected,
+                                        activeColor: MingaTheme.accentGreen,
+                                        onChanged: (value) async {
+                                          if (value == true &&
+                                              !favoriteIds.contains(place.id)) {
+                                            await _placeRepository.addFavorite(
+                                              placeId: place.id,
+                                              userId: currentUser.id,
+                                            );
+                                            favoriteIds.add(place.id);
+                                            favoritePlaces.insert(0, place);
+                                          }
+                                          setModalState(() {
+                                            if (value == true) {
+                                              selectedIds.add(place.id);
+                                            } else {
+                                              selectedIds.remove(place.id);
+                                            }
+                                          });
+                                        },
+                                      ),
+                                      onTap: () async {
+                                        if (!isSelected &&
+                                            !favoriteIds.contains(place.id)) {
+                                          await _placeRepository.addFavorite(
+                                            placeId: place.id,
+                                            userId: currentUser.id,
+                                          );
+                                          favoriteIds.add(place.id);
+                                          favoritePlaces.insert(0, place);
                                         }
-                                      });
-                                    },
-                                  ),
-                                  onTap: () {
-                                    setModalState(() {
-                                      if (isSelected) {
-                                        selectedIds.remove(place.id);
-                                      } else {
-                                        selectedIds.add(place.id);
-                                      }
-                                    });
+                                        setModalState(() {
+                                          if (isSelected) {
+                                            selectedIds.remove(place.id);
+                                          } else {
+                                            selectedIds.add(place.id);
+                                          }
+                                        });
+                                      },
+                                    );
                                   },
-                                );
-                              },
-                            ),
+                                ),
                     ),
                     SizedBox(height: 12),
                     SizedBox(
@@ -549,7 +897,7 @@ class _CollabCreateScreenState extends State<CollabCreateScreen> {
 
     if (!mounted || result == null) return;
     setState(() {
-      _selectedPlaces = places
+      _selectedPlaces = favoritePlaces
           .where((place) => result.contains(place.id))
           .toList();
     });

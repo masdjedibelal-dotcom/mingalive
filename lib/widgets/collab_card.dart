@@ -132,10 +132,10 @@ class _CollabCardState extends State<CollabCard> {
                       end: Alignment.bottomCenter,
                       colors: [
                         tokens.colors.transparent,
-                        tokens.colors.scrim,
-                        tokens.colors.scrimStrong,
+                        tokens.colors.scrim.withOpacity(0.6),
+                        tokens.colors.scrimStrong.withOpacity(0.9),
                       ],
-                      stops: const [0.0, 0.55, 1.0],
+                      stops: const [0.35, 0.75, 1.0],
                     ),
                   ),
                 ),
@@ -153,7 +153,7 @@ class _CollabCardState extends State<CollabCard> {
               Positioned(
                 left: tokens.space.s12,
                 right: tokens.space.s12,
-                bottom: tokens.space.s12,
+                bottom: tokens.space.s6,
                 child: _buildText(),
               ),
               if (widget.onEditTap != null)
@@ -257,7 +257,8 @@ class _CollabCardState extends State<CollabCard> {
           overflow: TextOverflow.ellipsis,
           style: tokens.type.title.copyWith(
             color: tokens.colors.textPrimary,
-            height: 1.2,
+            fontSize: 16,
+            height: 1.1,
           ),
         ),
         SizedBox(height: tokens.space.s6),
@@ -288,18 +289,18 @@ class _CollabCardState extends State<CollabCard> {
           child: Row(
             children: [
               CircleAvatar(
-                radius: 10,
+                radius: 9,
                 backgroundColor: tokens.colors.scrim,
                 backgroundImage: _avatarImage,
                 child: _avatarImage == null
                     ? Icon(
                         Icons.person,
-                        size: 12,
+                        size: 10,
                         color: tokens.colors.textSecondary,
                       )
                     : null,
               ),
-              SizedBox(width: tokens.space.s6),
+              SizedBox(width: tokens.space.s4),
               Expanded(
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -311,6 +312,7 @@ class _CollabCardState extends State<CollabCard> {
                         overflow: TextOverflow.ellipsis,
                         style: tokens.type.caption.copyWith(
                           color: tokens.colors.textSecondary,
+                          fontSize: 11,
                         ),
                       ),
                     ),
@@ -322,7 +324,7 @@ class _CollabCardState extends State<CollabCard> {
                         scrim: tokens.card.glassOverlay,
                         borderColor: tokens.colors.border,
                         padding: EdgeInsets.symmetric(
-                          horizontal: tokens.space.s6,
+                          horizontal: tokens.space.s4,
                           vertical: tokens.space.s2,
                         ),
                         child: Text(
@@ -331,7 +333,7 @@ class _CollabCardState extends State<CollabCard> {
                           overflow: TextOverflow.ellipsis,
                           style: tokens.type.caption.copyWith(
                             color: tokens.colors.textPrimary,
-                            fontSize: 10,
+                            fontSize: 9,
                             letterSpacing: 0.2,
                           ),
                         ),

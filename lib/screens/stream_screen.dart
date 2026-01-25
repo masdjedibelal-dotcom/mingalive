@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'dart:math';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../theme/app_theme_extensions.dart';
+import '../theme/app_tokens.dart';
 import '../data/place_repository.dart';
 import '../models/place.dart';
 import '../models/chat_message.dart';
@@ -14,6 +17,7 @@ import '../widgets/media_card.dart';
 import '../widgets/add_to_collab_sheet.dart';
 import '../widgets/glass/glass_badge.dart';
 import '../widgets/glass/glass_button.dart';
+import '../widgets/glass/glass_bottom_sheet.dart';
 import '../widgets/glass/glass_surface.dart';
 import '../services/chat_repository.dart';
 import '../services/supabase_chat_repository.dart';
@@ -23,6 +27,43 @@ import 'main_shell.dart';
 import '../state/location_store.dart';
 import '../models/app_location.dart';
 import '../utils/distance_utils.dart';
+
+enum StreamView { list, map }
+
+class _RoomMessagePreview {
+  final Place place;
+  final ChatMessage? message;
+
+  const _RoomMessagePreview({
+    required this.place,
+    required this.message,
+  });
+}
+
+class _PlaceCluster {
+  final String key;
+  final List<Place> places;
+
+  _PlaceCluster({
+    required this.key,
+    required this.places,
+  });
+
+  factory _PlaceCluster.single(Place place) {
+    return _PlaceCluster(key: place.id, places: [place]);
+  }
+
+  LatLng get center {
+    final avgLat =
+        places.map((p) => p.lat ?? 0).reduce((a, b) => a + b) / places.length;
+    final avgLng =
+        places.map((p) => p.lng ?? 0).reduce((a, b) => a + b) / places.length;
+    return LatLng(avgLat, avgLng);
+  }
+
+  int get totalLiveCount =>
+      places.fold(0, (sum, place) => sum + place.liveCount);
+}
 
 /// Chat-first Twitch-style stream screen
 /// 
@@ -49,9 +90,28 @@ class StreamScreenState extends State<StreamScreen>
   static const double MAX_DISTANCE_KM = 20;
   static const int VISIBLE_PAGE_SIZE = 20;
   static const int VISIBLE_PREFETCH_THRESHOLD = 5;
+  static const int MAP_MAX_PINS = 20;
+  static final LatLngBounds _munichBounds = LatLngBounds(
+    southwest: LatLng(47.95, 11.35),
+    northeast: LatLng(48.35, 11.85),
+  );
+  static const double _mapMinZoom = 10.5;
+  static const double _mapMaxZoom = 17.5;
+  static const String _darkMapStyle = r'''
+[
+  {"elementType":"geometry","stylers":[{"color":"#151a20"}]},
+  {"elementType":"labels","stylers":[{"visibility":"off"}]},
+  {"featureType":"road","elementType":"geometry","stylers":[{"color":"#1f2630"}]},
+  {"featureType":"road.highway","elementType":"geometry","stylers":[{"color":"#26303b"}]},
+  {"featureType":"transit","elementType":"geometry","stylers":[{"visibility":"off"}]},
+  {"featureType":"poi","elementType":"labels","stylers":[{"visibility":"off"}]},
+  {"featureType":"water","elementType":"geometry","stylers":[{"color":"#0f141a"}]}
+]
+''';
   final PageController _pageController = PageController();
   final PlaceRepository _repository = PlaceRepository();
   final LocationStore _locationStore = LocationStore();
+  late final dynamic _chatRepository;
   List<Place> _poolPlaces = [];
   List<Place> _sortedPlaces = [];
   int _visibleCount = 0;
@@ -72,19 +132,51 @@ class StreamScreenState extends State<StreamScreen>
   double? _userLng;
   String? _userLabel;
   AppLocationSource? _userSource;
+  bool _didFirstFrame = false;
+  StreamView _activeView = StreamView.map;
+  GoogleMapController? _mapController;
+  CameraPosition? _lastMapCamera;
+  bool _isMapLoading = false;
+  bool _mapStyleReady = false;
+  List<_RoomMessagePreview> _mapPreviews = [];
+  Timer? _mapRefreshTimer;
+  Set<Marker> _mapMarkers = {};
+  Set<Circle> _mapCircles = {};
+  double _tickerExtent = 0;
+  bool _tickerInitialized = false;
+  final Map<String, BitmapDescriptor> _markerIconCache = {};
+  Timer? _loginGateTimer;
+  String? _expandedClusterKey;
+  bool get _isTickerExpanded => _tickerExtent > 140;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _didFirstFrame = true;
+    });
     
     _activeRoomId = widget.activeRoomId;
     _activePlaceId = widget.activePlaceId;
     debugPrint('🟢 StreamScreen activePlaceId=${widget.activePlaceId} activeRoomId=${widget.activeRoomId}');
+    if ((_activePlaceId != null && _activePlaceId!.isNotEmpty) ||
+        (_activeRoomId != null && _activeRoomId!.isNotEmpty)) {
+      _activeView = StreamView.list;
+    }
+
+    if (SupabaseGate.isEnabled) {
+      _chatRepository = SupabaseChatRepository();
+    } else {
+      _chatRepository = ChatRepository();
+    }
 
     _locationStore.addListener(_handleLocationUpdate);
     _locationStore.init();
     _syncUserLocation(_locationStore.currentLocation, force: true);
+
+    _scheduleGuestLoginNotice();
 
     _loadFeedPlaces().then((_) async {
       if (widget.activePlaceId != null && widget.activePlaceId!.isNotEmpty) {
@@ -110,6 +202,7 @@ class StreamScreenState extends State<StreamScreen>
     if (widget.activePlaceId != oldWidget.activePlaceId) {
       _activePlaceId = widget.activePlaceId;
       if (_activePlaceId != null && _activePlaceId!.isNotEmpty) {
+        _setStreamView(StreamView.list);
         jumpToPlace(_activePlaceId!);
       }
     }
@@ -165,6 +258,13 @@ class StreamScreenState extends State<StreamScreen>
     debugPrint('STREAM_JUMPED_ONLY (no subscriptions)');
   }
 
+  void openPlaceRoom(String placeId) {
+    _setStreamView(StreamView.list);
+    _activePlaceId = placeId;
+    _activeRoomId = 'place_$placeId';
+    jumpToPlace(placeId);
+  }
+
   Future<void> _waitForPageController() async {
     if (!mounted) return;
     final completer = Completer<void>();
@@ -192,6 +292,30 @@ class StreamScreenState extends State<StreamScreen>
     }
 
     _maybeIncreaseVisibleCount(currentPage);
+  }
+
+  void _scheduleGuestLoginNotice() {
+    if (AuthService.instance.currentUser != null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        const SnackBar(
+          content: Text('Als Gast kannst du nicht schreiben. Bitte einloggen.'),
+          duration: Duration(seconds: 3),
+        ),
+      );
+    });
+    _loginGateTimer?.cancel();
+    _loginGateTimer = Timer(const Duration(seconds: 30), () {
+      if (!mounted) return;
+      if (AuthService.instance.currentUser != null) return;
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        const SnackBar(
+          content: Text('Bitte einloggen, um im Stream zu schreiben.'),
+          duration: Duration(seconds: 4),
+        ),
+      );
+    });
   }
 
   void _maybeIncreaseVisibleCount(int? currentPage) {
@@ -335,6 +459,444 @@ class StreamScreenState extends State<StreamScreen>
       if (!_pageController.hasClients) return;
       _pageController.jumpToPage(newIndex);
     });
+    _scheduleMapRefresh();
+  }
+
+  void _setStreamView(StreamView next) {
+    if (_activeView == next) return;
+    setState(() {
+      _activeView = next;
+    });
+    if (next == StreamView.map) {
+      setState(() {
+        _mapStyleReady = false;
+      });
+      _applyMapStyle();
+      _scheduleMapRefresh();
+    }
+  }
+
+  Future<void> _applyMapStyle() async {
+    if (_mapController == null) return;
+    await _mapController!.setMapStyle(_darkMapStyle);
+    if (!mounted) return;
+    setState(() {
+      _mapStyleReady = true;
+    });
+  }
+
+  List<Place> get _mapPlaces {
+    final candidates = _sortedPlaces
+        .where((place) => place.lat != null && place.lng != null)
+        .toList();
+    if (candidates.length <= MAP_MAX_PINS) return candidates;
+    return candidates.take(MAP_MAX_PINS).toList();
+  }
+
+  void _scheduleMapRefresh() {
+    _mapRefreshTimer?.cancel();
+    _mapRefreshTimer = Timer(const Duration(milliseconds: 200), () {
+      _refreshMapPreviews();
+      _rebuildMapOverlays();
+    });
+  }
+
+  Future<void> _refreshMapPreviews() async {
+    if (_isMapLoading) return;
+    if (!mounted) return;
+    final rooms = _sortedPlaces;
+    if (rooms.isEmpty) {
+      setState(() {
+        _mapPreviews = [];
+      });
+      return;
+    }
+
+    setState(() {
+      _isMapLoading = true;
+    });
+
+    Map<String, ChatMessage> latestByRoom = {};
+    if (SupabaseGate.isEnabled && _chatRepository is SupabaseChatRepository) {
+      final repo = _chatRepository as SupabaseChatRepository;
+      latestByRoom = await repo.fetchLatestMessages(
+        rooms.map((place) => place.roomId).toList(),
+      );
+    }
+
+    if (!mounted) return;
+    final now = DateTime.now();
+    final previews = rooms
+        .map(
+          (place) => _RoomMessagePreview(
+            place: place,
+            message: latestByRoom[place.roomId],
+          ),
+        )
+        .toList();
+
+    previews.sort((a, b) {
+      final aTime = a.message?.createdAt;
+      final bTime = b.message?.createdAt;
+      if (aTime == null && bTime == null) return 0;
+      if (aTime == null) return 1;
+      if (bTime == null) return -1;
+      return bTime.compareTo(aTime);
+    });
+
+    final recentOnly = previews.where((preview) {
+      final createdAt = preview.message?.createdAt;
+      if (createdAt == null) return false;
+      return now.difference(createdAt).inHours < 24;
+    }).toList();
+
+    setState(() {
+      _mapPreviews = recentOnly.take(10).toList();
+      _isMapLoading = false;
+    });
+  }
+
+  void _rebuildMapOverlays() {
+    _rebuildMapOverlaysAsync();
+  }
+
+  Future<void> _rebuildMapOverlaysAsync() async {
+    final places = _mapPlaces;
+    if (places.isEmpty) {
+      setState(() {
+        _mapMarkers = {};
+        _mapCircles = {};
+      });
+      return;
+    }
+
+    final zoom = _lastMapCamera?.zoom ?? 13.5;
+    final shouldCluster = places.length >= 10;
+    final clusters = shouldCluster
+        ? _clusterPlaces(places, zoom)
+        : [for (final place in places) _PlaceCluster.single(place)];
+
+    final markers = <Marker>{};
+    final circles = <Circle>{};
+    final latestById = <String, ChatMessage?>{
+      for (final preview in _mapPreviews) preview.place.id: preview.message,
+    };
+
+    for (final cluster in clusters) {
+      final activity = _clusterActivityScore(cluster, latestById);
+      final isCluster = cluster.places.length > 1;
+      final markerColor = _markerColorForActivity(activity, isCluster: isCluster);
+      final icon = await _markerIconFor(
+        color: markerColor,
+        label: isCluster ? '${cluster.places.length}' : null,
+        size: isCluster ? 56 : 44,
+      );
+      if ((_expandedClusterKey != null &&
+              _expandedClusterKey == cluster.key) ||
+          cluster.places.length > 5) {
+        for (final place in cluster.places) {
+          final position = LatLng(place.lat!, place.lng!);
+          final placeActivity = _activityScoreForPlace(
+            place,
+            latestById[place.id],
+          );
+          final placeIcon = await _markerIconFor(
+            color: _markerColorForActivity(placeActivity, isCluster: false),
+            label: null,
+            size: 44,
+          );
+          markers.add(
+            Marker(
+              markerId: MarkerId(place.id),
+              position: position,
+              onTap: () => _showMapRoomPreview(place),
+              icon: placeIcon,
+              alpha: 0.95,
+              zIndex: 3,
+            ),
+          );
+          if (placeActivity > 0) {
+            circles.add(
+              Circle(
+                circleId: CircleId(place.id),
+                center: position,
+                radius: _heatRadiusForActivity(placeActivity),
+                fillColor: _heatColorForActivity(placeActivity),
+                strokeColor:
+                    _heatColorForActivity(placeActivity).withOpacity(0.4),
+                strokeWidth: 1,
+              ),
+            );
+          }
+        }
+        continue;
+      }
+      if (cluster.places.length == 1) {
+        final place = cluster.places.first;
+        final position = LatLng(place.lat!, place.lng!);
+        markers.add(
+          Marker(
+            markerId: MarkerId(place.id),
+            position: position,
+            onTap: () => _showMapRoomPreview(place),
+            icon: icon,
+            alpha: 0.9,
+          ),
+        );
+        final placeActivity = _activityScoreForPlace(place, latestById[place.id]);
+        if (placeActivity > 0) {
+          circles.add(
+            Circle(
+              circleId: CircleId(place.id),
+              center: position,
+              radius: _heatRadiusForActivity(placeActivity),
+              fillColor: _heatColorForActivity(placeActivity),
+              strokeColor: _heatColorForActivity(placeActivity).withOpacity(0.4),
+              strokeWidth: 1,
+            ),
+          );
+        }
+      } else {
+        final position = cluster.center;
+        markers.add(
+          Marker(
+            markerId: MarkerId('cluster_${cluster.key}'),
+            position: position,
+            icon: icon,
+            alpha: 0.95,
+            zIndex: 2,
+            infoWindow: const InfoWindow(title: '', snippet: ''),
+            onTap: () {
+              if (_mapController == null) return;
+              final bounds = _boundsForPlaces(cluster.places);
+              if (bounds != null) {
+                final padding = MediaQuery.of(context).size.width * 0.12;
+                setState(() {
+                  _expandedClusterKey = cluster.key;
+                });
+                _mapController!.animateCamera(
+                  CameraUpdate.newLatLngBounds(bounds, padding),
+                );
+                _rebuildMapOverlays();
+              } else {
+                _mapController!.animateCamera(
+                  CameraUpdate.newLatLngZoom(position, zoom + 1.5),
+                );
+              }
+            },
+          ),
+        );
+        if (activity > 0) {
+          circles.add(
+            Circle(
+              circleId: CircleId('cluster_${cluster.key}'),
+              center: position,
+              radius: _heatRadiusForActivity(activity),
+              fillColor: _heatColorForActivity(activity),
+              strokeColor: _heatColorForActivity(activity).withOpacity(0.4),
+              strokeWidth: 1,
+            ),
+          );
+        }
+      }
+    }
+
+    setState(() {
+      _mapMarkers = markers;
+      _mapCircles = circles;
+    });
+  }
+
+  List<_PlaceCluster> _clusterPlaces(List<Place> places, double zoom) {
+    final cellSize = _clusterCellSize(zoom);
+    final buckets = <String, _PlaceCluster>{};
+    for (final place in places) {
+      final lat = place.lat!;
+      final lng = place.lng!;
+      final bucketLat = (lat / cellSize).round();
+      final bucketLng = (lng / cellSize).round();
+      final key = '$bucketLat-$bucketLng';
+      final existing = buckets[key];
+      if (existing == null) {
+        buckets[key] = _PlaceCluster(key: key, places: [place]);
+      } else {
+        existing.places.add(place);
+      }
+    }
+    return buckets.values.toList();
+  }
+
+  LatLngBounds? _boundsForPlaces(List<Place> places) {
+    if (places.isEmpty) return null;
+    double? minLat;
+    double? maxLat;
+    double? minLng;
+    double? maxLng;
+
+    for (final place in places) {
+      final lat = place.lat;
+      final lng = place.lng;
+      if (lat == null || lng == null) continue;
+      minLat = minLat == null ? lat : min(minLat, lat);
+      maxLat = maxLat == null ? lat : max(maxLat, lat);
+      minLng = minLng == null ? lng : min(minLng, lng);
+      maxLng = maxLng == null ? lng : max(maxLng, lng);
+    }
+
+    if (minLat == null || maxLat == null || minLng == null || maxLng == null) {
+      return null;
+    }
+
+    final padding = 0.0015;
+    return LatLngBounds(
+      southwest: LatLng(minLat - padding, minLng - padding),
+      northeast: LatLng(maxLat + padding, maxLng + padding),
+    );
+  }
+
+  double _clusterCellSize(double zoom) {
+    if (zoom >= 15) return 0.004;
+    if (zoom >= 13) return 0.008;
+    if (zoom >= 11) return 0.02;
+    return 0.04;
+  }
+
+  int _activityScoreForPlace(Place place, ChatMessage? message) {
+    final live = place.liveCount;
+    if (live > 0) {
+      return live;
+    }
+    if (message == null) return 0;
+    final minutes = DateTime.now().difference(message.createdAt).inMinutes;
+    if (minutes <= 5) return 6;
+    if (minutes <= 30) return 3;
+    if (minutes <= 120) return 1;
+    return 0;
+  }
+
+  int _clusterActivityScore(
+    _PlaceCluster cluster,
+    Map<String, ChatMessage?> latestById,
+  ) {
+    var total = 0;
+    for (final place in cluster.places) {
+      total += _activityScoreForPlace(place, latestById[place.id]);
+    }
+    return total;
+  }
+
+  Color _markerColorForActivity(int activity, {bool isCluster = false}) {
+    if (activity <= 0) {
+      return const Color(0xFF7B8794);
+    }
+    if (isCluster) {
+      if (activity >= 15) return const Color(0xFF6B4CFF);
+      if (activity >= 5) return const Color(0xFF4AA5FF);
+      return const Color(0xFF3AD3FF);
+    }
+    if (activity >= 15) return const Color(0xFF45E1FF);
+    if (activity >= 5) return const Color(0xFF4AA5FF);
+    return const Color(0xFF7B8794);
+  }
+
+  Future<BitmapDescriptor> _markerIconFor({
+    required Color color,
+    String? label,
+    double size = 44,
+  }) async {
+    final key = '${color.value}_${label ?? 'pin'}_${size.toInt()}';
+    final cached = _markerIconCache[key];
+    if (cached != null) return cached;
+
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    final radius = size / 2;
+    final center = Offset(radius, radius);
+
+    final fillPaint = Paint()..color = color;
+    final borderPaint = Paint()
+      ..color = Colors.white.withOpacity(0.9)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = label == null ? 2 : 3;
+
+    canvas.drawCircle(center, radius - 1, fillPaint);
+    canvas.drawCircle(center, radius - 1, borderPaint);
+
+    if (label != null) {
+      final textPainter = TextPainter(
+        text: TextSpan(
+          text: label,
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: size * 0.36,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        textAlign: TextAlign.center,
+        textDirection: TextDirection.ltr,
+      )..layout(minWidth: 0, maxWidth: size);
+      textPainter.paint(
+        canvas,
+        Offset(
+          center.dx - textPainter.width / 2,
+          center.dy - textPainter.height / 2,
+        ),
+      );
+    } else {
+      final iconPainter = TextPainter(
+        text: TextSpan(
+          text: String.fromCharCode(Icons.chat_bubble.codePoint),
+          style: TextStyle(
+            fontFamily: Icons.chat_bubble.fontFamily,
+            package: Icons.chat_bubble.fontPackage,
+            color: Colors.white.withOpacity(0.95),
+            fontSize: size * 0.5,
+          ),
+        ),
+        textAlign: TextAlign.center,
+        textDirection: TextDirection.ltr,
+      )..layout(minWidth: 0, maxWidth: size);
+      iconPainter.paint(
+        canvas,
+        Offset(
+          center.dx - iconPainter.width / 2,
+          center.dy - iconPainter.height / 2,
+        ),
+      );
+    }
+
+    final picture = recorder.endRecording();
+    final image = await picture.toImage(size.toInt(), size.toInt());
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+    if (bytes == null) {
+      return BitmapDescriptor.defaultMarker;
+    }
+    final descriptor = BitmapDescriptor.fromBytes(bytes.buffer.asUint8List());
+    _markerIconCache[key] = descriptor;
+    return descriptor;
+  }
+
+  double _heatRadiusForActivity(int activity) {
+    final zoom = _lastMapCamera?.zoom ?? 13.5;
+    final zoomFactor = (zoom / 13.5).clamp(0.9, 1.45);
+    final base = 220.0 + (activity * 26).clamp(0, 320).toDouble();
+    return base * zoomFactor;
+  }
+
+  Color _heatColorForActivity(int activity) {
+    final zoom = _lastMapCamera?.zoom ?? 13.5;
+    final baseOpacity = zoom >= 15
+        ? 0.7
+        : zoom >= 13
+            ? 0.6
+            : 0.5;
+    if (activity >= 15) {
+      return const Color(0xFF6B4CFF).withOpacity(baseOpacity);
+    }
+    if (activity >= 5) {
+      return const Color(0xFF3BD6FF).withOpacity(baseOpacity);
+    }
+    return const Color(0xFF8FE3FF).withOpacity(baseOpacity * 0.8);
   }
 
   
@@ -344,6 +906,8 @@ class StreamScreenState extends State<StreamScreen>
     WidgetsBinding.instance.removeObserver(this);
     _pageController.removeListener(_onPageChanged);
     _favoritePrefetchTimer?.cancel();
+    _mapRefreshTimer?.cancel();
+    _loginGateTimer?.cancel();
     
     _pageController.dispose();
     _locationStore.removeListener(_handleLocationUpdate);
@@ -398,36 +962,64 @@ class StreamScreenState extends State<StreamScreen>
       );
     }
 
-    // Default: PageView for multiple places
     final bottomInset = MediaQuery.of(context).padding.bottom + 4;
     return Scaffold(
       backgroundColor: tokens.colors.bg,
       resizeToAvoidBottomInset: true,
-      body: Padding(
-        padding: EdgeInsets.only(bottom: bottomInset),
-        child: Stack(
-          children: [
-            PageView.builder(
-              controller: _pageController,
-              scrollDirection: Axis.vertical,
-              itemCount: _visibleCount,
-              itemBuilder: (context, index) {
-                final place = _sortedPlaces[index];
-                return _buildStreamItem(place, index);
-              },
-            ),
-            if (_isLoadingPool && _sortedPlaces.isNotEmpty)
-              Align(
-                alignment: Alignment.bottomCenter,
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: 18),
-                  child: _buildFooterLoader(),
-                ),
+      body: Stack(
+        children: [
+          Offstage(
+            offstage: _activeView != StreamView.map,
+            child: _buildMapBody(tokens),
+          ),
+          Offstage(
+            offstage: _activeView != StreamView.list,
+            child: _buildListBody(tokens, bottomInset),
+          ),
+          Align(
+            alignment: Alignment.topCenter,
+            child: Padding(
+              padding: EdgeInsets.only(
+                top: MediaQuery.of(context).padding.top + 40,
               ),
-          ],
-        ),
+              child: _buildViewToggle(tokens),
+            ),
+          ),
+        ],
       ),
     );
+  }
+
+
+  Widget _buildListBody(AppTokens tokens, double bottomInset) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottomInset),
+      child: Stack(
+        children: [
+          PageView.builder(
+            controller: _pageController,
+            scrollDirection: Axis.vertical,
+            itemCount: _visibleCount,
+            itemBuilder: (context, index) {
+              final place = _sortedPlaces[index];
+              return _buildStreamItem(place, index);
+            },
+          ),
+          if (_isLoadingPool && _sortedPlaces.isNotEmpty)
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 18),
+                child: _buildFooterLoader(),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMapBody(AppTokens tokens) {
+    return SizedBox.expand(child: _buildMapView());
   }
 
   Widget _buildLoaderScaffold(String message) {
@@ -501,6 +1093,484 @@ class StreamScreenState extends State<StreamScreen>
         ],
       ),
     );
+  }
+
+  Widget _buildViewToggle(AppTokens tokens) {
+    final isList = _activeView == StreamView.list;
+    return GlassSurface(
+      radius: tokens.radius.pill,
+      blur: tokens.blur.low,
+      scrim: tokens.card.glassOverlay,
+      borderColor: tokens.colors.border,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildToggleChip(
+            label: 'Liste',
+            isActive: isList,
+            onTap: () => _setStreamView(StreamView.list),
+          ),
+          _buildToggleChip(
+            label: 'Karte',
+            isActive: !isList,
+            onTap: () => _setStreamView(StreamView.map),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildToggleChip({
+    required String label,
+    required bool isActive,
+    required VoidCallback onTap,
+  }) {
+    final tokens = context.tokens;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(tokens.radius.pill),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: EdgeInsets.symmetric(
+          horizontal: tokens.space.s12,
+          vertical: tokens.space.s8,
+        ),
+        decoration: BoxDecoration(
+          color: isActive ? tokens.colors.accent.withOpacity(0.2) : null,
+          borderRadius: BorderRadius.circular(tokens.radius.pill),
+        ),
+        child: Text(
+          label,
+          style: tokens.type.caption.copyWith(
+            color: isActive ? tokens.colors.accent : tokens.colors.textSecondary,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMapView() {
+    final tokens = context.tokens;
+    final center = _hasUserLocation
+        ? LatLng(_userLat!, _userLng!)
+        : const LatLng(48.137154, 11.576124);
+    final initialCamera = _lastMapCamera ??
+        CameraPosition(target: center, zoom: 13.5);
+
+    return Stack(
+      children: [
+        GoogleMap(
+          initialCameraPosition: initialCamera,
+          onMapCreated: (controller) {
+            _mapController = controller;
+            _mapStyleReady = false;
+            _applyMapStyle();
+            if (_activeView == StreamView.map) {
+              _scheduleMapRefresh();
+            }
+          },
+          onCameraMove: (position) {
+            _lastMapCamera = position;
+          },
+          onCameraIdle: _rebuildMapOverlays,
+          myLocationEnabled: _hasUserLocation,
+          myLocationButtonEnabled: false,
+          zoomControlsEnabled: false,
+          compassEnabled: false,
+          mapToolbarEnabled: false,
+          zoomGesturesEnabled: !_isTickerExpanded,
+          scrollGesturesEnabled: !_isTickerExpanded,
+          rotateGesturesEnabled: !_isTickerExpanded,
+          tiltGesturesEnabled: !_isTickerExpanded,
+          minMaxZoomPreference: MinMaxZoomPreference(_mapMinZoom, _mapMaxZoom),
+          cameraTargetBounds: CameraTargetBounds(_munichBounds),
+          markers: _mapMarkers,
+          circles: _mapCircles,
+        ),
+        if (!_mapStyleReady)
+          Positioned.fill(
+            child: Container(
+              color: tokens.colors.bg,
+              child: Center(
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: tokens.colors.textSecondary,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        _buildLiveTickerPanel(tokens),
+        Align(
+          alignment: Alignment.centerRight,
+          child: Padding(
+            padding: EdgeInsets.only(right: tokens.space.s12),
+            child: _buildMapControls(tokens),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMapControls(AppTokens tokens) {
+    return GlassSurface(
+      radius: tokens.radius.md,
+      blur: tokens.blur.low,
+      scrim: tokens.card.glassOverlay,
+      borderColor: tokens.colors.border,
+      padding: EdgeInsets.symmetric(
+        vertical: tokens.space.s6,
+        horizontal: tokens.space.s6,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          InkWell(
+            onTap: () {
+              if (_mapController == null) return;
+              _mapController!.animateCamera(CameraUpdate.zoomIn());
+            },
+            child: Padding(
+              padding: EdgeInsets.all(tokens.space.s4),
+              child: Icon(
+                Icons.add,
+                size: 16,
+                color: tokens.colors.textPrimary,
+              ),
+            ),
+          ),
+          SizedBox(height: tokens.space.s6),
+          InkWell(
+            onTap: () {
+              if (_mapController == null) return;
+              _mapController!.animateCamera(CameraUpdate.zoomOut());
+            },
+            child: Padding(
+              padding: EdgeInsets.all(tokens.space.s4),
+              child: Icon(
+                Icons.remove,
+                size: 16,
+                color: tokens.colors.textPrimary,
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          InkWell(
+            onTap: () {
+              if (_mapController == null) return;
+              if (!_hasUserLocation) return;
+              _mapController!.animateCamera(
+                CameraUpdate.newLatLng(
+                  LatLng(_userLat!, _userLng!),
+                ),
+              );
+            },
+            child: Padding(
+              padding: EdgeInsets.all(tokens.space.s4),
+              child: Icon(
+                Icons.my_location,
+                size: 16,
+                color: tokens.colors.textPrimary,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _openPlaceFromMap(Place place) {
+    _setStreamView(StreamView.list);
+    jumpToPlace(place.id);
+  }
+
+  _RoomMessagePreview? _previewForPlace(Place place) {
+    return _mapPreviews.firstWhere(
+      (preview) => preview.place.id == place.id,
+      orElse: () => _RoomMessagePreview(place: place, message: null),
+    );
+  }
+
+  Future<void> _showMapRoomPreview(Place place) async {
+    final preview = _previewForPlace(place);
+    if (preview == null) return;
+    final tokens = context.tokens;
+    final message = preview.message;
+    final text = message?.text.trim().isNotEmpty == true
+        ? message!.text.trim()
+        : 'Noch keine Nachricht';
+
+    await showGlassBottomSheet(
+      context: context,
+      isScrollControlled: false,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 260),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              preview.place.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: tokens.type.title.copyWith(
+                color: tokens.colors.textPrimary,
+              ),
+            ),
+            SizedBox(height: tokens.space.s8),
+            Row(
+              children: [
+                _InfoChip(
+                  label: 'Online ${preview.place.liveCount}',
+                  variant: GlassBadgeVariant.online,
+                ),
+                SizedBox(width: tokens.space.s8),
+                if (preview.place.distanceKm != null)
+                  _InfoChip(
+                    label: '${preview.place.distanceKm!.toStringAsFixed(1)} km',
+                    variant: GlassBadgeVariant.fresh,
+                  ),
+              ],
+            ),
+            SizedBox(height: tokens.space.s12),
+            Text(
+              text,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: tokens.type.body.copyWith(
+                color: tokens.colors.textSecondary,
+                height: 1.4,
+              ),
+            ),
+            SizedBox(height: tokens.space.s12),
+            GlassButton(
+              label: 'Chatroom öffnen',
+              onPressed: () {
+                Navigator.of(context).pop();
+                _openPlaceFromMap(preview.place);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLiveTickerPanel(AppTokens tokens) {
+    final media = MediaQuery.of(context);
+    final minHeight = 120.0;
+    final maxHeight = media.size.height * 0.45;
+    if (!_tickerInitialized) {
+      _tickerExtent = minHeight;
+      _tickerInitialized = true;
+    }
+    _tickerExtent = _tickerExtent.clamp(minHeight, maxHeight);
+
+    final toggleTop = media.padding.top + 40;
+    final panelTop = toggleTop + 52 + tokens.space.s8;
+
+    return Positioned(
+      left: 16,
+      right: 16,
+      top: panelTop,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOut,
+        height: _tickerExtent,
+        child: GlassSurface(
+          radius: tokens.radius.xl,
+          blur: tokens.blur.low,
+          scrim: tokens.card.glassOverlay,
+          borderColor: tokens.colors.border,
+          padding: EdgeInsets.fromLTRB(
+            tokens.space.s16,
+            tokens.space.s12,
+            tokens.space.s16,
+            tokens.space.s12,
+          ),
+          child: Column(
+            children: [
+              GestureDetector(
+                onVerticalDragUpdate: (details) {
+                  setState(() {
+                    _tickerExtent = (_tickerExtent - details.delta.dy)
+                        .clamp(minHeight, maxHeight);
+                  });
+                },
+                onVerticalDragEnd: (_) {
+                  final midpoint = (minHeight + maxHeight) / 2;
+                  setState(() {
+                    _tickerExtent =
+                        _tickerExtent < midpoint ? minHeight : maxHeight;
+                  });
+                },
+                child: InkWell(
+                  onTap: () {
+                    final midpoint = (minHeight + maxHeight) / 2;
+                    setState(() {
+                      _tickerExtent =
+                          _tickerExtent < midpoint ? maxHeight : minHeight;
+                    });
+                  },
+                  borderRadius: BorderRadius.circular(tokens.radius.lg),
+                  child: Padding(
+                    padding: EdgeInsets.only(bottom: tokens.space.s8),
+                    child: Column(
+                      children: [
+                        Container(
+                          width: 42,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: tokens.colors.textMuted.withOpacity(0.4),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                        ),
+                        SizedBox(height: tokens.space.s8),
+                        Row(
+                          children: [
+                            Text(
+                              'Live‑Ticker',
+                              style: tokens.type.title.copyWith(
+                                color: tokens.colors.textPrimary,
+                                fontSize: 16,
+                              ),
+                            ),
+                            const Spacer(),
+                            if (_isMapLoading)
+                              SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: tokens.colors.textSecondary,
+                                ),
+                              ),
+                            SizedBox(width: tokens.space.s8),
+                            Icon(
+                              _tickerExtent > minHeight + 10
+                                  ? Icons.expand_less
+                                  : Icons.expand_more,
+                              color: tokens.colors.textSecondary,
+                              size: 18,
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              SizedBox(height: tokens.space.s8),
+              Expanded(
+                  child: _mapPreviews.isEmpty
+                      ? Center(
+                          child: Text(
+                            'Keine Nachrichten aktuell.',
+                            style: tokens.type.body.copyWith(
+                              color: tokens.colors.textSecondary,
+                              fontSize: 12,
+                            ),
+                          ),
+                        )
+                      : ListView.separated(
+                          itemCount: _mapPreviews.length,
+                        separatorBuilder: (_, __) =>
+                            SizedBox(height: tokens.space.s8),
+                        itemBuilder: (context, index) {
+                          final preview = _mapPreviews[index];
+                          final message = preview.message;
+                          return InkWell(
+                            onTap: () => _openPlaceFromMap(preview.place),
+                            borderRadius:
+                                BorderRadius.circular(tokens.radius.md),
+                            child: Padding(
+                              padding: EdgeInsets.symmetric(
+                                horizontal: tokens.space.s8,
+                                vertical: tokens.space.s6,
+                              ),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    width: 42,
+                                    height: 42,
+                                    decoration: BoxDecoration(
+                                      color: tokens.colors.surfaceStrong
+                                          .withOpacity(0.3),
+                                      borderRadius: BorderRadius.circular(
+                                        tokens.radius.md,
+                                      ),
+                                    ),
+                                    child: Icon(
+                                      Icons.chat_bubble,
+                                      color: tokens.colors.textSecondary,
+                                      size: 18,
+                                    ),
+                                  ),
+                                  SizedBox(width: tokens.space.s8),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          preview.place.name,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: tokens.type.body.copyWith(
+                                            color: tokens.colors.textPrimary,
+                                            fontWeight: FontWeight.w600,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                        SizedBox(height: tokens.space.s4),
+                                        Text(
+                                          message?.text.trim().isNotEmpty == true
+                                              ? message!.text.trim()
+                                              : 'Noch keine Nachricht',
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: tokens.type.caption.copyWith(
+                                            color: tokens.colors.textSecondary,
+                                            fontSize: 11,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  SizedBox(width: tokens.space.s8),
+                                  Text(
+                                    _formatRelativeTime(message?.createdAt),
+                                    style: tokens.type.caption.copyWith(
+                                      color: tokens.colors.textMuted,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _formatRelativeTime(DateTime? time) {
+    if (time == null) return '';
+    final now = DateTime.now();
+    final diff = now.difference(time);
+    if (diff.inMinutes < 1) return 'Jetzt';
+    if (diff.inMinutes < 60) return 'vor ${diff.inMinutes} Min';
+    if (diff.inHours < 24) return 'vor ${diff.inHours} Std';
+    return 'vor ${diff.inDays} Tg';
   }
 
   void _maybeReloadOnVisibility() {
@@ -716,8 +1786,62 @@ class StreamScreenState extends State<StreamScreen>
     final shouldResort =
         force || coordsChanged || nextLabel != prevLabel || nextSource != prevSource;
     if (shouldResort) {
-      _resortStreamPlaces();
+      if (coordsChanged) {
+        if (mounted && _didFirstFrame) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            final messenger = ScaffoldMessenger.maybeOf(context);
+            if (messenger == null) return;
+            messenger.showSnackBar(
+              SnackBar(
+                backgroundColor: Colors.transparent,
+                elevation: 0,
+                behavior: SnackBarBehavior.floating,
+                duration: const Duration(milliseconds: 1400),
+                content: GlassSurface(
+                  radius: 14,
+                  blur: context.tokens.blur.low,
+                  scrim: context.tokens.card.glassOverlay,
+                  borderColor: context.tokens.colors.border,
+                  padding: EdgeInsets.symmetric(
+                    horizontal: context.tokens.space.s12,
+                    vertical: context.tokens.space.s8,
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.location_on,
+                        size: 16,
+                        color: context.tokens.colors.accent,
+                      ),
+                      SizedBox(width: context.tokens.space.s8),
+                      Text(
+                        'Aktualisiere Nähe…',
+                        style: context.tokens.type.body.copyWith(
+                          color: context.tokens.colors.textPrimary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          });
+        }
+        _fetchNextPoolChunk(reset: true);
+      } else {
+        _resortStreamPlaces();
+      }
     }
+
+    if (coordsChanged && _activeView == StreamView.map && _mapController != null) {
+      final target = LatLng(nextLat, nextLng);
+      _mapController!.animateCamera(
+        CameraUpdate.newLatLng(target),
+      );
+    }
+    _scheduleMapRefresh();
   }
 
   void _resortStreamPlaces() {
@@ -1241,7 +2365,7 @@ class _StreamChatPaneState extends State<StreamChatPane> {
         roomId: roomId,
         userId: '',
         onSend: (_, __, ___) async {},
-        placeholder: 'Schreib etwas…',
+        placeholder: 'Nur eingeloggte Mitglieder können teilnehmen.',
         enabled: false,
       );
     }

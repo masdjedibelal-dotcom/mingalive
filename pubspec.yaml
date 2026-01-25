@@ -17,7 +17,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.0+9
+version: 1.0.0+10
 
 environment:
   # Note: Requires Dart SDK >=3.0.0 for google_generative_ai package
@@ -50,6 +50,7 @@ dependencies:
   http: ^1.2.1
   share_plus: ^12.0.1
   font_awesome_flutter: ^10.7.0
+  google_maps_flutter: ^2.10.1
 
 dev_dependencies:
   flutter_test:

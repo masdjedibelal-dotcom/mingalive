@@ -147,6 +147,8 @@ class _LocationPickerSheetState extends State<LocationPickerSheet> {
   Widget build(BuildContext context) {
     final sheetHeight = MediaQuery.of(context).size.height * 0.85;
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    final selected = widget.locationStore.currentLocation;
+    final isManual = selected.source == AppLocationSource.manual;
     return SafeArea(
       top: false,
       child: SizedBox(
@@ -242,12 +244,27 @@ class _LocationPickerSheetState extends State<LocationPickerSheet> {
                           Navigator.of(context).pop();
                         }
                       },
-                trailing: Icon(
-                  Icons.check,
-                  size: 16,
-                  color: MingaTheme.accentGreen,
-                ),
+                trailing: isManual
+                    ? null
+                    : Icon(
+                        Icons.check,
+                        size: 16,
+                        color: MingaTheme.accentGreen,
+                      ),
               ),
+              if (isManual) ...[
+                SizedBox(height: 6),
+                _buildActionRow(
+                  icon: Icons.place_outlined,
+                  label: 'Ausgewählter Standort · ${selected.label}',
+                  onTap: null,
+                  trailing: Icon(
+                    Icons.check,
+                    size: 16,
+                    color: MingaTheme.accentGreen,
+                  ),
+                ),
+              ],
               SizedBox(height: 8),
               Expanded(child: _buildSuggestionsBody()),
             ],

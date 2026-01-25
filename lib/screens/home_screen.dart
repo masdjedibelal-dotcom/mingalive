@@ -10,6 +10,7 @@ import 'main_shell.dart';
 import 'creator_profile_screen.dart';
 import 'collabs_explore_screen.dart';
 import 'collab_detail_screen.dart';
+import '../theme/app_theme_extensions.dart';
 import '../models/collab.dart';
 import '../models/app_location.dart';
 import '../services/supabase_collabs_repository.dart';
@@ -63,6 +64,9 @@ class _HomeScreenState extends State<HomeScreen> {
   static const String _quickIntroKey = 'home_quick_intro_dismissed';
   static const double _hypeMaxDistanceKm = 20;
   static const int _hypeLimit = 5;
+  final PageController _introController = PageController();
+  Timer? _introTimer;
+  int _introIndex = 0;
   final SupabaseChatRepository _chatRepository = SupabaseChatRepository();
   final Map<String, StreamSubscription<List<ChatMessage>>>
       _hypeMessageSubscriptions = {};
@@ -76,6 +80,7 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _locationStore.init();
     _loadQuickIntroPreference();
+    _startIntroCarousel();
     _loadStreamPreviewPlace();
     _loadHypePlaces();
     _checkActivityNotifications();
@@ -248,9 +253,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
       var selected = inRange.take(_hypeLimit).toList();
       if (selected.isEmpty) {
-        final fallback = List<Place>.from(rooms)
-          ..sort(PlaceRepository.compareByDistanceNullable);
-        selected = fallback.take(_hypeLimit).toList();
+        final unknownDistance =
+            rooms.where((place) => place.distanceKm == null).toList();
+        if (unknownDistance.isNotEmpty) {
+          unknownDistance.sort(PlaceRepository.compareByDistanceNullable);
+          selected = unknownDistance.take(_hypeLimit).toList();
+        }
       }
       setState(() {
         _hypePlaces = selected;
@@ -341,10 +349,26 @@ class _HomeScreenState extends State<HomeScreen> {
     for (final sub in _hypeMessageSubscriptions.values) {
       sub.cancel();
     }
+    _introTimer?.cancel();
+    _introController.dispose();
     _locationReloadDebounce?.cancel();
     _locationStore.removeListener(_handleLocationChange);
     _locationStore.dispose();
     super.dispose();
+  }
+
+  void _startIntroCarousel() {
+    _introTimer?.cancel();
+    _introTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+      if (!mounted || !_showQuickIntro) return;
+      final next = (_introIndex + 1) % _introSlides.length;
+      _introIndex = next;
+      _introController.animateToPage(
+        next,
+        duration: const Duration(milliseconds: 320),
+        curve: Curves.easeOut,
+      );
+    });
   }
 
   void _handleLocationChange() {
@@ -604,18 +628,36 @@ class _HomeScreenState extends State<HomeScreen> {
     return items;
   }
 
+  List<CollabDefinition> get _eventSystemCollabs {
+    return _systemCollabs
+        .where((collab) => collab.id == 'events_this_week')
+        .toList();
+  }
+
+  List<CollabDefinition> get _nearbySystemCollabs {
+    return _systemCollabs
+        .where((collab) => collab.id != 'events_this_week')
+        .toList();
+  }
+
   Widget _buildCollabSection({
     required String title,
     required List<Collab> collabs,
     required CollabsExploreFilter filter,
     bool? isLoading,
     String? emptyText,
+    String? subtitle,
+    IconData? titleIcon,
+    double? height,
   }) {
     final limited = collabs.take(6).toList();
     return CollabCarousel(
       title: title,
+      subtitle: subtitle,
+      titleIcon: titleIcon,
       isLoading: isLoading ?? _isCollabLoading,
       emptyText: emptyText ?? 'Noch keine Collabs verfügbar',
+      height: height ?? 260,
       onSeeAll: () {
         Navigator.of(context).push(
           MaterialPageRoute(
@@ -647,12 +689,20 @@ class _HomeScreenState extends State<HomeScreen> {
     required String title,
     required List<CollabDefinition> collabs,
     bool isLoading = false,
+    String emptyText = 'Noch keine Collabs verfügbar',
+    bool showSeeAll = true,
+    String? subtitle,
+    IconData? titleIcon,
+    double? height,
   }) {
     final limited = collabs.take(6).toList();
     return CollabCarousel(
       title: title,
+      subtitle: subtitle,
+      titleIcon: titleIcon,
       isLoading: isLoading,
-      emptyText: 'Noch keine Collabs verfügbar',
+      emptyText: emptyText,
+      height: height ?? 115,
       onSeeAll: () {
         Navigator.of(context).push(
           MaterialPageRoute(
@@ -662,7 +712,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         );
       },
-      showSeeAll: true,
+      showSeeAll: showSeeAll,
       itemCount: limited.length,
       itemBuilder: (context, index) {
         final collab = limited[index];
@@ -691,6 +741,7 @@ class _HomeScreenState extends State<HomeScreen> {
       avatarUrl: collab.creatorAvatarUrl,
       creatorId: collab.creatorId,
       creatorBadge: null,
+      aspectRatio: 16 / 10,
       mediaUrls: mediaUrls,
       imageUrl: mediaUrls.isNotEmpty ? mediaUrls.first : collab.heroImageUrl,
       gradientKey: collab.gradientKey,
@@ -771,6 +822,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     _maybeReloadOnVisibility();
+    final tokens = context.tokens;
     return Scaffold(
       backgroundColor: MingaTheme.background,
       body: SafeArea(
@@ -792,38 +844,92 @@ class _HomeScreenState extends State<HomeScreen> {
                 _buildHeroStreamCard(),
                 if (_showQuickIntro) ...[
                   SizedBox(height: 16),
-                  _buildQuickIntroCard(),
+                  _buildIntroBannerCarousel(),
                 ],
                 SizedBox(height: 28),
-                _buildSystemCollabSection(
-                  title: 'In deiner Nähe',
-                  collabs: _systemCollabs,
-                  isLoading: _isSystemCollabsLoading,
+                _buildSectionPanel(
+                  tint: tokens.colors.info.withOpacity(0.04),
+                  radius: tokens.radius.xl,
+                  child: Padding(
+                    padding: EdgeInsets.all(tokens.space.s2),
+                    child: _buildSystemCollabSection(
+                      title: 'In deiner Nähe',
+                      collabs: _nearbySystemCollabs,
+                      isLoading: _isSystemCollabsLoading,
+                      subtitle: 'Kuratiert für deine Umgebung',
+                      titleIcon: Icons.near_me,
+                      height: 115,
+                    ),
+                  ),
                 ),
                 SizedBox(height: 28),
-                _buildCollabSection(
-                  title: 'Gefolgt',
-                  collabs: _savedCollabs,
-                  filter: CollabsExploreFilter.following,
-                  isLoading: _isFollowingLoading,
-                  emptyText: 'Du folgst noch keinen Collabs.',
+                _buildSectionPanel(
+                  tint: tokens.colors.warning.withOpacity(0.04),
+                  radius: tokens.radius.xl,
+                  child: Padding(
+                    padding: EdgeInsets.all(tokens.space.s2),
+                    child: _buildSystemCollabSection(
+                      title: 'Events diese Woche',
+                      collabs: _eventSystemCollabs,
+                      isLoading: _isSystemCollabsLoading,
+                      emptyText: 'Keine Events diese Woche',
+                      showSeeAll: false,
+                      subtitle: 'Alle kommenden Highlights der Woche',
+                      titleIcon: Icons.event,
+                      height: 115,
+                    ),
+                  ),
                 ),
                 SizedBox(height: 28),
-                _buildCollabSection(
-                  title: 'Beliebte Collabs',
-                  collabs: _popularCollabs,
-                  filter: CollabsExploreFilter.popular,
+                _buildSectionPanel(
+                  tint: tokens.colors.surfaceStrong.withOpacity(0.06),
+                  child: _buildCollabSection(
+                    title: 'Gefolgt',
+                    collabs: _savedCollabs,
+                    filter: CollabsExploreFilter.following,
+                    isLoading: _isFollowingLoading,
+                    emptyText: 'Du folgst noch keinen Collabs.',
+                    subtitle: 'Deine gespeicherten Listen',
+                    titleIcon: Icons.bookmark,
+                    height: 260,
+                  ),
                 ),
                 SizedBox(height: 28),
-                _buildCollabSection(
-                  title: 'Neue Collabs',
-                  collabs: _newestCollabs,
-                  filter: CollabsExploreFilter.newest,
+                _buildSectionPanel(
+                  tint: tokens.colors.surfaceStrong.withOpacity(0.06),
+                  child: _buildCollabSection(
+                    title: 'Beliebte Collabs',
+                    collabs: _popularCollabs,
+                    filter: CollabsExploreFilter.popular,
+                    subtitle: 'Gerade im Trend',
+                    titleIcon: Icons.trending_up,
+                    height: 260,
+                  ),
+                ),
+                SizedBox(height: 28),
+                _buildSectionPanel(
+                  tint: tokens.colors.surfaceStrong.withOpacity(0.06),
+                  child: _buildCollabSection(
+                    title: 'Neue Collabs',
+                    collabs: _newestCollabs,
+                    filter: CollabsExploreFilter.newest,
+                    subtitle: 'Frisch von Creators',
+                    titleIcon: Icons.fiber_new,
+                    height: 260,
+                  ),
                 ),
                 SizedBox(height: 36),
-                _buildSectionTitle("Gerade angesagt"),
-                SizedBox(height: 16),
-                _buildHypeCarousel(context),
+                _buildSectionPanel(
+                  tint: tokens.colors.accent.withOpacity(0.04),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildSectionTitle("Gerade angesagt"),
+                      SizedBox(height: 16),
+                      _buildHypeCarousel(context),
+                    ],
+                  ),
+                ),
                 SizedBox(height: 28),
               ],
             ),
@@ -910,6 +1016,22 @@ class _HomeScreenState extends State<HomeScreen> {
     return Text(
       title,
       style: MingaTheme.titleSmall,
+    );
+  }
+
+  Widget _buildSectionPanel({
+    required Widget child,
+    Color? tint,
+    double? radius,
+  }) {
+    final tokens = context.tokens;
+    return Container(
+      decoration: BoxDecoration(
+        color: tint ?? tokens.colors.surface.withOpacity(0.04),
+        borderRadius: BorderRadius.circular(radius ?? tokens.radius.lg),
+      ),
+      padding: EdgeInsets.all(tokens.space.s12),
+      child: child,
     );
   }
 
@@ -1056,54 +1178,82 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildQuickIntroCard() {
-    return GlassCard(
-      padding: const EdgeInsets.all(16),
-      child: Column(
+  List<_IntroSlideData> get _introSlides => [
+        const _IntroSlideData(
+          title: 'Entdecke deine Stadt',
+          subtitle:
+              'Swipe Live‑Rooms und sieh, was gerade in deiner Nähe passiert.',
+          icon: Icons.play_circle_fill,
+          accent: Color(0xFF45C27E),
+          background: Color(0xFF1B2A24),
+        ),
+        const _IntroSlideData(
+          title: 'Kuratiert für dich',
+          subtitle:
+              'Collabs von Creators – die besten Spots in einer Liste.',
+          icon: Icons.collections_bookmark,
+          accent: Color(0xFF4DA3FF),
+          background: Color(0xFF1C2330),
+        ),
+        const _IntroSlideData(
+          title: 'Events entdecken',
+          subtitle:
+              'Finde Highlights der Woche und plane deinen nächsten Abend.',
+          icon: Icons.event,
+          accent: Color(0xFFFF8A3D),
+          background: Color(0xFF2B221A),
+        ),
+      ];
+
+  Widget _buildIntroBannerCarousel() {
+    final height = MediaQuery.of(context).size.height * 0.22;
+    return SizedBox(
+      height: height.clamp(180, 240),
+      child: Stack(
         children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'So funktioniert Minga',
-                    style: MingaTheme.titleSmall,
-                  ),
-                ),
-                IconButton(
-                  onPressed: _dismissQuickIntro,
-                  icon: Icon(Icons.close, color: MingaTheme.textSubtle),
-                ),
-              ],
+          PageView.builder(
+            controller: _introController,
+            itemCount: _introSlides.length,
+            onPageChanged: (index) {
+              _introIndex = index;
+            },
+            itemBuilder: (context, index) {
+              final slide = _introSlides[index];
+              return _IntroBannerCard(
+                data: slide,
+              );
+            },
+          ),
+          Positioned(
+            top: 10,
+            right: 10,
+            child: IconButton(
+              onPressed: _dismissQuickIntro,
+              icon: Icon(Icons.close, color: MingaTheme.textPrimary),
             ),
-            SizedBox(height: 6),
-            Row(
-              children: const [
-                Expanded(
-                  child: _IntroItem(
-                    icon: Icons.play_circle_fill,
-                    title: 'Stream',
-                    subtitle: 'Swipe Live‑Orte',
+          ),
+          Positioned(
+            left: 16,
+            bottom: 12,
+            child: Row(
+              children: List.generate(
+                _introSlides.length,
+                (index) => AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  width: _introIndex == index ? 16 : 6,
+                  height: 6,
+                  margin: const EdgeInsets.only(right: 6),
+                  decoration: BoxDecoration(
+                    color: _introIndex == index
+                        ? MingaTheme.textPrimary
+                        : MingaTheme.textSubtle,
+                    borderRadius: BorderRadius.circular(6),
                   ),
                 ),
-                SizedBox(width: 12),
-                Expanded(
-                  child: _IntroItem(
-                    icon: Icons.collections_bookmark,
-                    title: 'Collabs',
-                    subtitle: 'Listen von Creators',
-                  ),
-                ),
-                SizedBox(width: 12),
-                Expanded(
-                  child: _IntroItem(
-                    icon: Icons.search,
-                    title: 'Discovery',
-                    subtitle: 'Suche & Ideen',
-                  ),
-                ),
-              ],
+              ),
             ),
-          ],
+          ),
+        ],
       ),
     );
   }
@@ -1114,6 +1264,19 @@ class _HomeScreenState extends State<HomeScreen> {
         height: 210,
         child: Center(
           child: CircularProgressIndicator(color: MingaTheme.accentGreen),
+        ),
+      );
+    }
+    if (_isHypeLoading && _hypePlaces.isNotEmpty) {
+      return SizedBox(
+        height: 210,
+        child: Center(
+          child: Text(
+            'Aktualisiere Nähe…',
+            style: MingaTheme.bodySmall.copyWith(
+              color: MingaTheme.textSubtle,
+            ),
+          ),
         ),
       );
     }
@@ -1149,39 +1312,75 @@ class _HomeScreenState extends State<HomeScreen> {
 
 }
 
-class _IntroItem extends StatelessWidget {
-  final IconData icon;
+class _IntroSlideData {
   final String title;
   final String subtitle;
+  final IconData icon;
+  final Color accent;
+  final Color background;
 
-  const _IntroItem({
-    required this.icon,
+  const _IntroSlideData({
     required this.title,
     required this.subtitle,
+    required this.icon,
+    required this.accent,
+    required this.background,
   });
+}
+
+class _IntroBannerCard extends StatelessWidget {
+  final _IntroSlideData data;
+
+  const _IntroBannerCard({required this.data});
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Icon(icon, color: MingaTheme.accentGreen, size: 22),
-        SizedBox(height: 6),
-        Text(
-          title,
-          style: MingaTheme.textMuted.copyWith(
-            color: MingaTheme.textPrimary,
-            fontWeight: FontWeight.w700,
+    return Container(
+      decoration: BoxDecoration(
+        color: data.background,
+        borderRadius: BorderRadius.circular(MingaTheme.radiusLg),
+      ),
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 24),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: data.accent.withOpacity(0.18),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              data.icon,
+              color: data.accent,
+              size: 22,
+            ),
           ),
-        ),
-        SizedBox(height: 4),
-        Text(
-          subtitle,
-          textAlign: TextAlign.center,
-          style: MingaTheme.bodySmall.copyWith(
-            color: MingaTheme.textSubtle,
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  data.title,
+                  style: MingaTheme.titleMedium.copyWith(
+                    color: MingaTheme.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  data.subtitle,
+                  style: MingaTheme.bodySmall.copyWith(
+                    color: MingaTheme.textSecondary,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

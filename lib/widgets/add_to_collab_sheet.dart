@@ -8,6 +8,7 @@ import '../widgets/glass/glass_bottom_sheet.dart';
 import '../widgets/glass/glass_button.dart';
 import '../widgets/glass/glass_surface.dart';
 import '../widgets/glass/glass_text_field.dart';
+import '../utils/bottom_nav_padding.dart';
 
 Future<void> showAddToCollabSheet({
   required BuildContext context,
@@ -65,6 +66,8 @@ class _AddToCollabSheetState extends State<_AddToCollabSheet> {
   List<Collab> _publicCollabs = [];
   final Map<String, Set<String>> _collabPlaceIds = {};
   bool _isLoading = true;
+  bool _showAllPublic = false;
+  bool _isPublicExpanded = false;
 
   @override
   void initState() {
@@ -122,7 +125,9 @@ class _AddToCollabSheetState extends State<_AddToCollabSheet> {
           left: tokens.space.s20,
           right: tokens.space.s20,
           top: tokens.space.s12,
-          bottom: MediaQuery.of(context).viewInsets.bottom + tokens.space.s20,
+          bottom: MediaQuery.of(context).viewInsets.bottom +
+              tokens.space.s20 +
+              bottomNavSafePadding(context),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -256,34 +261,100 @@ class _AddToCollabSheetState extends State<_AddToCollabSheet> {
             ],
             if (_publicCollabs.isNotEmpty) ...[
               SizedBox(height: tokens.space.s20),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  'Öffentliche Collabs',
-                  style: tokens.type.caption.copyWith(
-                    color: tokens.colors.textSecondary,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              SizedBox(height: tokens.space.s8),
-              ..._publicCollabs.map(
-                (collab) => ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(
-                    collab.title,
-                    style: tokens.type.body.copyWith(
-                      color: tokens.colors.textSecondary,
+              GestureDetector(
+                onTap: () {
+                  setState(() {
+                    _isPublicExpanded = !_isPublicExpanded;
+                  });
+                },
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Öffentliche Collabs',
+                        style: tokens.type.caption.copyWith(
+                          color: tokens.colors.textSecondary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ),
-                  ),
-                  subtitle: Text(
-                    'Nur eigene Collabs können Spots aufnehmen.',
-                    style: tokens.type.caption.copyWith(
+                    Text(
+                      '${_publicCollabs.length}',
+                      style: tokens.type.caption.copyWith(
+                        color: tokens.colors.textMuted,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Icon(
+                      _isPublicExpanded
+                          ? Icons.keyboard_arrow_up
+                          : Icons.keyboard_arrow_down,
+                      size: 18,
                       color: tokens.colors.textMuted,
                     ),
-                  ),
+                  ],
                 ),
               ),
+              SizedBox(height: tokens.space.s6),
+              Text(
+                'Nur eigene Collabs können Spots aufnehmen.',
+                style: tokens.type.caption.copyWith(
+                  color: tokens.colors.textMuted,
+                ),
+              ),
+              if (_isPublicExpanded) ...[
+                SizedBox(height: tokens.space.s8),
+                ...(_showAllPublic
+                        ? _publicCollabs
+                        : _publicCollabs.take(4))
+                    .map(
+                  (collab) => ListTile(
+                    dense: true,
+                    visualDensity: VisualDensity.compact,
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(
+                      collab.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: tokens.type.body.copyWith(
+                        color: tokens.colors.textSecondary,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
+                ),
+                if (_publicCollabs.length > 4) ...[
+                  SizedBox(height: tokens.space.s6),
+                  GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        _showAllPublic = !_showAllPublic;
+                      });
+                    },
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _showAllPublic ? 'Weniger anzeigen' : 'Mehr anzeigen',
+                          style: tokens.type.body.copyWith(
+                            color: tokens.colors.accent,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Icon(
+                          _showAllPublic
+                              ? Icons.keyboard_arrow_up
+                              : Icons.keyboard_arrow_down,
+                          size: 18,
+                          color: tokens.colors.accent,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
             ],
             SizedBox(height: tokens.space.s16),
             SizedBox(

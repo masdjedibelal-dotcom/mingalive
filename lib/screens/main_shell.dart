@@ -51,7 +51,7 @@ class _MainShellState extends State<MainShell> {
     // Ensure any pushed routes are dismissed so Stream is visible.
     _popToRoot(1);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _streamScreenKey.currentState?.jumpToPlace(placeId);
+      _streamScreenKey.currentState?.openPlaceRoom(placeId);
     });
   }
 

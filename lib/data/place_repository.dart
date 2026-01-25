@@ -238,6 +238,10 @@ class PlaceRepository {
       // Search in category (case-insensitive, partial match)
       if (place.category.toLowerCase().contains(lowerQuery)) return true;
       
+      // Search in address if available
+      final address = place.address?.toLowerCase() ?? '';
+      if (address.isNotEmpty && address.contains(lowerQuery)) return true;
+      
       // Search in optional keywords/tags if available (case-insensitive, partial match)
       if (place.tags.isNotEmpty) {
         for (final tag in place.tags) {
@@ -1036,7 +1040,7 @@ class PlaceRepository {
         var supabaseQuery = supabase
             .from('places')
             .select('*')
-            .or('name.ilike.%$query%,category.ilike.%$query%');
+            .or('name.ilike.%$query%,category.ilike.%$query%,address.ilike.%$query%');
         
         // Filter by kind if provided
         if (kind != null && kind.isNotEmpty) {

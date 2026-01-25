@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart' as gmaps;
 import 'package:share_plus/share_plus.dart';
 import 'theme.dart';
 import '../data/collabs.dart';
@@ -28,6 +29,7 @@ import '../widgets/media/media_viewer.dart';
 import '../widgets/glass/glass_button.dart';
 import '../widgets/glass/glass_text_field.dart';
 import '../widgets/glass/glass_bottom_sheet.dart';
+import '../widgets/glass/glass_badge.dart';
 import '../data/system_collabs.dart';
 import '../theme/app_theme_extensions.dart';
 import '../theme/app_tokens.dart';
@@ -81,8 +83,21 @@ class _CollabShareData {
   });
 }
 
+enum CollabPlacesView { list, map }
+
 class _CollabDetailScreenState extends State<CollabDetailScreen> {
   static const int _noteMaxChars = 120;
+  static const String _darkMapStyle = r'''
+[
+  {"elementType":"geometry","stylers":[{"color":"#151a20"}]},
+  {"elementType":"labels","stylers":[{"visibility":"off"}]},
+  {"featureType":"road","elementType":"geometry","stylers":[{"color":"#1f2630"}]},
+  {"featureType":"road.highway","elementType":"geometry","stylers":[{"color":"#26303b"}]},
+  {"featureType":"transit","elementType":"geometry","stylers":[{"visibility":"off"}]},
+  {"featureType":"poi","elementType":"labels","stylers":[{"visibility":"off"}]},
+  {"featureType":"water","elementType":"geometry","stylers":[{"color":"#0f141a"}]}
+]
+''';
   final PlaceRepository _repository = PlaceRepository();
   final EventRepository _eventRepository = EventRepository();
   final SupabaseFavoritesRepository _favoritesRepository =
@@ -111,6 +126,8 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
   final Set<String> _expandedNoteKeys = {};
   bool _isSystemLoading = true;
   final Map<String, List<String>> _fallbackMediaByCollabId = {};
+  gmaps.GoogleMapController? _collabMapController;
+  final Map<String, gmaps.BitmapDescriptor> _collabMarkerCache = {};
 
   @override
   void initState() {
@@ -223,7 +240,7 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
     final fallbackUrls = _fallbackMediaByCollabId[collabId] ?? const [];
 
     return SizedBox(
-      height: 260,
+      height: 240,
       child: Stack(
         children: [
           Positioned.fill(
@@ -254,25 +271,35 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
           Positioned(
             left: 20,
             right: 20,
-            bottom: 20,
+            bottom: 12,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
                   title,
-                  style: MingaTheme.titleLarge.copyWith(height: 1.2),
+                  style: MingaTheme.titleMedium.copyWith(
+                    fontSize: 20,
+                    height: 1.15,
+                    shadows: [
+                      Shadow(
+                        color: MingaTheme.darkOverlay,
+                        blurRadius: 8,
+                      ),
+                    ],
+                  ),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
-                SizedBox(height: 8),
-                _buildCreatorRow(collab),
-                SizedBox(height: 12),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: isOwner
-                      ? _buildEditButton(collabId, collab)
-                      : _buildFollowButton(collabId),
+                SizedBox(height: 6),
+                Row(
+                  children: [
+                    Expanded(child: _buildCreatorRow(collab)),
+                    SizedBox(width: 12),
+                    isOwner
+                        ? _buildEditButton(collabId, collab)
+                        : _buildFollowButton(collabId),
+                  ],
                 ),
               ],
             ),
@@ -346,12 +373,23 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
               title: title,
               description: trimmed,
             ),
-            child: Text(
-              'Mehr anzeigen',
-              style: MingaTheme.bodySmall.copyWith(
-                color: MingaTheme.accentGreen,
-                fontWeight: FontWeight.w600,
-              ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Mehr lesen',
+                  style: MingaTheme.bodySmall.copyWith(
+                    color: MingaTheme.accentGreen,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Icon(
+                  Icons.chevron_right,
+                  size: 16,
+                  color: MingaTheme.accentGreen,
+                ),
+              ],
             ),
           ),
         ],
@@ -378,7 +416,7 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
             Row(
               children: [
                 Expanded(
-                  child: Text('Editorial', style: MingaTheme.titleSmall),
+                  child: Text('Notiz', style: MingaTheme.titleSmall),
                 ),
                 IconButton(
                   icon: Icon(Icons.close, color: MingaTheme.textSecondary),
@@ -809,7 +847,7 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
     required _CollabShareData data,
     required List<Place> places,
   }) async {
-    const pageSize = 5;
+    const pageSize = 7;
     final chunks = <List<Place>>[];
     if (places.isEmpty) {
       chunks.add(const []);
@@ -940,6 +978,7 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
     required int pageIndex,
     required int totalPages,
   }) async {
+    const pageSize = 7;
     const width = 1080.0;
     const height = 1350.0;
     const padding = 72.0;
@@ -1098,7 +1137,7 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
     }
 
     double rowY = listTop + 78;
-    final rowHeight = 96.0;
+    final rowHeight = 84.0;
     final accentPaint = Paint()..color = MingaTheme.accentGreen;
     if (places.isEmpty) {
       final emptyPainter = TextPainter(
@@ -1116,9 +1155,9 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
     } else {
       for (var i = 0; i < places.length; i++) {
         final place = places[i];
-        final index = (pageIndex * 5) + i + 1;
-        final numberCenter = Offset(padding + 44, rowY + 24);
-        canvas.drawCircle(numberCenter, 22, accentPaint);
+        final index = (pageIndex * pageSize) + i + 1;
+        final numberCenter = Offset(padding + 44, rowY + 22);
+        canvas.drawCircle(numberCenter, 20, accentPaint);
         final numberPainter = TextPainter(
           text: TextSpan(
             text: '$index',
@@ -1144,7 +1183,7 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
             text: place.name.trim(),
             style: const TextStyle(
               color: Colors.white,
-              fontSize: 28,
+              fontSize: 26,
               fontWeight: FontWeight.w600,
             ),
           ),
@@ -1159,11 +1198,11 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
           final detailsPainter = TextPainter(
             text: TextSpan(
               text: details,
-              style: const TextStyle(
-                color: Color(0xFF95A39B),
-                fontSize: 22,
-                height: 1.2,
-              ),
+            style: const TextStyle(
+              color: Color(0xFF95A39B),
+              fontSize: 20,
+              height: 1.2,
+            ),
             ),
             textDirection: TextDirection.ltr,
             maxLines: 1,
@@ -1222,6 +1261,7 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
     final frame = await codec.getNextFrame();
     return frame.image;
   }
+
 
   void _openCreatorProfile(String userId) {
     if (userId.trim().isEmpty) {
@@ -1521,8 +1561,8 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
         final ownerId = _collabDataById[collabId]?.ownerId;
         final canEditNotes =
             ownerId != null && _isOwnerById(ownerId);
-        return ListView.separated(
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+        final list = ListView.separated(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
           itemCount: limitedPlaces.length,
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
@@ -1532,34 +1572,50 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
           ),
           itemBuilder: (context, index) {
             final place = limitedPlaces[index];
-            return PlaceListTile(
-              place: place,
-              note: notes[place.id],
-              isNoteExpanded:
-                  _expandedNoteKeys.contains(_noteKey(collabId, place.id)),
-              onToggleNote: () => _toggleNote(collabId, place.id),
-              onEditNote: canEditNotes
-                  ? () => _showPlaceNoteSheet(
-                        collabId: collabId,
-                        placeId: place.id,
-                        initialNote: notes[place.id],
-                        isSupabase: true,
-                      )
-                  : null,
-              onTap: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (context) => DetailScreen(
-                      placeId: place.id,
-                      openPlaceChat: (placeId) {
-                        MainShell.of(context)?.openPlaceChat(placeId);
-                      },
-                    ),
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildPlaceNumberBadge(index + 1),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: PlaceListTile(
+                    place: place,
+                    note: notes[place.id],
+                    isNoteExpanded:
+                        _expandedNoteKeys.contains(_noteKey(collabId, place.id)),
+                    onToggleNote: () => _toggleNote(collabId, place.id),
+                    onEditNote: canEditNotes
+                        ? () => _showPlaceNoteSheet(
+                              collabId: collabId,
+                              placeId: place.id,
+                              initialNote: notes[place.id],
+                              isSupabase: true,
+                            )
+                        : null,
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) => DetailScreen(
+                            placeId: place.id,
+                            openPlaceChat: (placeId) {
+                              MainShell.of(context)?.openPlaceChat(placeId);
+                            },
+                          ),
+                        ),
+                      );
+                    },
                   ),
-                );
-              },
+                ),
+              ],
             );
           },
+        );
+
+        return Column(
+          children: [
+            _buildPlacesMap(limitedPlaces),
+            list,
+          ],
         );
       },
     );
@@ -1912,8 +1968,8 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
         _scheduleFallbackUpdate(collab.id, limitedPlaces);
 
         final canEditNotes = _isOwnerById(collab.creatorId);
-        return ListView.separated(
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+        final list = ListView.separated(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
           itemCount: limitedPlaces.length,
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
@@ -1923,21 +1979,256 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
           ),
           itemBuilder: (context, index) {
             final place = limitedPlaces[index];
-            return PlaceListTile(
-              place: place,
-              note: notes[place.id],
-              isNoteExpanded:
-                  _expandedNoteKeys.contains(_noteKey(collab.id, place.id)),
-              onToggleNote: () => _toggleNote(collab.id, place.id),
-              onEditNote: canEditNotes
-                  ? () => _showPlaceNoteSheet(
-                        collabId: collab.id,
-                        placeId: place.id,
-                        initialNote: notes[place.id],
-                        isSupabase: false,
-                      )
-                  : null,
-              onTap: () {
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildPlaceNumberBadge(index + 1),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: PlaceListTile(
+                    place: place,
+                    note: notes[place.id],
+                    isNoteExpanded:
+                        _expandedNoteKeys.contains(_noteKey(collab.id, place.id)),
+                    onToggleNote: () => _toggleNote(collab.id, place.id),
+                    onEditNote: canEditNotes
+                        ? () => _showPlaceNoteSheet(
+                              collabId: collab.id,
+                              placeId: place.id,
+                              initialNote: notes[place.id],
+                              isSupabase: false,
+                            )
+                        : null,
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) => DetailScreen(
+                            placeId: place.id,
+                            openPlaceChat: (placeId) {
+                              MainShell.of(context)?.openPlaceChat(placeId);
+                            },
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+
+        return Column(
+          children: [
+            _buildPlacesMap(limitedPlaces),
+            list,
+          ],
+        );
+      },
+    );
+  }
+
+
+  Widget _buildPlacesMap(List<Place> places) {
+    final tokens = context.tokens;
+    final placesWithCoords =
+        places.where((place) => place.lat != null && place.lng != null).toList();
+    if (placesWithCoords.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+        child: Text(
+          'Keine Standorte für die Karte verfügbar',
+          style: tokens.type.body.copyWith(color: tokens.colors.textSecondary),
+        ),
+      );
+    }
+
+    final bounds = _boundsForPlaces(placesWithCoords);
+    final center = bounds == null
+        ? gmaps.LatLng(48.137154, 11.576124)
+        : gmaps.LatLng(
+            (bounds.southwest.latitude + bounds.northeast.latitude) / 2,
+            (bounds.southwest.longitude + bounds.northeast.longitude) / 2,
+          );
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(tokens.radius.lg),
+        child: SizedBox(
+          height: 260,
+          child: FutureBuilder<Set<gmaps.Marker>>(
+            future: _buildNumberedMarkers(placesWithCoords),
+            builder: (context, snapshot) {
+              final markers = snapshot.data ?? const <gmaps.Marker>{};
+              return gmaps.GoogleMap(
+                initialCameraPosition: gmaps.CameraPosition(
+                  target: center,
+                  zoom: 13.2,
+                ),
+                onMapCreated: (controller) {
+                  _collabMapController = controller;
+                  _collabMapController?.setMapStyle(_darkMapStyle);
+                  if (bounds != null) {
+                    controller.animateCamera(
+                      gmaps.CameraUpdate.newLatLngBounds(bounds, 60),
+                    );
+                  }
+                },
+                myLocationEnabled: false,
+                myLocationButtonEnabled: false,
+                zoomControlsEnabled: true,
+                markers: markers,
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPlaceNumberBadge(int number) {
+    final tokens = context.tokens;
+    return Container(
+      width: 30,
+      height: 30,
+      decoration: BoxDecoration(
+        color: tokens.colors.accent,
+        shape: BoxShape.circle,
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        '$number',
+        style: tokens.type.caption.copyWith(
+          color: tokens.colors.textPrimary,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+
+  Future<Set<gmaps.Marker>> _buildNumberedMarkers(
+    List<Place> places,
+  ) async {
+    final markers = <gmaps.Marker>{};
+    for (var i = 0; i < places.length; i++) {
+      final place = places[i];
+      final icon = await _numberedMarkerIcon(i + 1);
+      markers.add(
+        gmaps.Marker(
+          markerId: gmaps.MarkerId(place.id),
+          position: gmaps.LatLng(place.lat!, place.lng!),
+          icon: icon,
+          onTap: () => _showCollabMapPreview(place),
+        ),
+      );
+    }
+    return markers;
+  }
+
+  Future<gmaps.BitmapDescriptor> _numberedMarkerIcon(int number) async {
+    final key = 'collab_$number';
+    final cached = _collabMarkerCache[key];
+    if (cached != null) return cached;
+
+    const size = 48.0;
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    final center = Offset(size / 2, size / 2);
+    final paint = Paint()..color = MingaTheme.accentGreen;
+    canvas.drawCircle(center, size / 2 - 4, paint);
+    canvas.drawCircle(
+      center,
+      size / 2 - 4,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 4
+        ..color = Colors.white.withOpacity(0.9),
+    );
+
+    final painter = TextPainter(
+      text: TextSpan(
+        text: '$number',
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 20,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      textAlign: TextAlign.center,
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: size);
+    painter.paint(
+      canvas,
+      Offset(
+        center.dx - painter.width / 2,
+        center.dy - painter.height / 2,
+      ),
+    );
+
+    final picture = recorder.endRecording();
+    final image = await picture.toImage(size.toInt(), size.toInt());
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+    if (bytes == null) {
+      return gmaps.BitmapDescriptor.defaultMarker;
+    }
+    final descriptor = gmaps.BitmapDescriptor.fromBytes(bytes.buffer.asUint8List());
+    _collabMarkerCache[key] = descriptor;
+    return descriptor;
+  }
+
+  Future<void> _showCollabMapPreview(Place place) async {
+    final tokens = context.tokens;
+    await showGlassBottomSheet(
+      context: context,
+      isScrollControlled: false,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 260),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              place.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: tokens.type.title.copyWith(
+                color: tokens.colors.textPrimary,
+              ),
+            ),
+            SizedBox(height: tokens.space.s8),
+            Wrap(
+              spacing: tokens.space.s8,
+              runSpacing: tokens.space.s6,
+              children: [
+                if (place.category.isNotEmpty)
+                  GlassBadge(
+                    label: place.category,
+                    variant: GlassBadgeVariant.fresh,
+                  ),
+                if (place.distanceKm != null)
+                  GlassBadge(
+                    label: '${place.distanceKm!.toStringAsFixed(1)} km',
+                    variant: GlassBadgeVariant.online,
+                  ),
+              ],
+            ),
+            SizedBox(height: tokens.space.s12),
+            if (place.address != null && place.address!.trim().isNotEmpty)
+              Text(
+                place.address!.trim(),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: tokens.type.body.copyWith(
+                  color: tokens.colors.textSecondary,
+                  height: 1.4,
+                ),
+              ),
+            SizedBox(height: tokens.space.s16),
+            GlassButton(
+              label: 'Spot öffnen',
+              onPressed: () {
+                Navigator.of(context).pop();
                 Navigator.of(context).push(
                   MaterialPageRoute(
                     builder: (context) => DetailScreen(
@@ -1949,10 +2240,33 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
                   ),
                 );
               },
-            );
-          },
-        );
-      },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  gmaps.LatLngBounds? _boundsForPlaces(List<Place> places) {
+    double? minLat;
+    double? maxLat;
+    double? minLng;
+    double? maxLng;
+    for (final place in places) {
+      final lat = place.lat;
+      final lng = place.lng;
+      if (lat == null || lng == null) continue;
+      minLat = minLat == null ? lat : math.min(minLat, lat);
+      maxLat = maxLat == null ? lat : math.max(maxLat, lat);
+      minLng = minLng == null ? lng : math.min(minLng, lng);
+      maxLng = maxLng == null ? lng : math.max(maxLng, lng);
+    }
+    if (minLat == null || maxLat == null || minLng == null || maxLng == null) {
+      return null;
+    }
+    return gmaps.LatLngBounds(
+      southwest: gmaps.LatLng(minLat, minLng),
+      northeast: gmaps.LatLng(maxLat, maxLng),
     );
   }
 

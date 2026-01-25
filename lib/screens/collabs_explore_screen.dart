@@ -9,6 +9,7 @@ import '../data/place_repository.dart';
 import '../data/system_collabs.dart';
 import '../widgets/collab_card.dart';
 import '../widgets/collab_carousel.dart';
+import '../theme/app_theme_extensions.dart';
 import '../models/collab.dart';
 import '../models/place.dart';
 import '../utils/bottom_nav_padding.dart';
@@ -49,6 +50,18 @@ class _CollabsExploreScreenState extends State<CollabsExploreScreen> {
   List<CollabDefinition> _systemCollabs = [];
   List<CollabDefinition> _followedSystemCollabs = [];
   final Map<String, List<String>> _fallbackMediaByCollabId = {};
+
+  List<CollabDefinition> get _eventSystemCollabs {
+    return _systemCollabs
+        .where((collab) => collab.id == 'events_this_week')
+        .toList();
+  }
+
+  List<CollabDefinition> get _nearbySystemCollabs {
+    return _systemCollabs
+        .where((collab) => collab.id != 'events_this_week')
+        .toList();
+  }
 
   @override
   void initState() {
@@ -156,6 +169,7 @@ class _CollabsExploreScreenState extends State<CollabsExploreScreen> {
   @override
   Widget build(BuildContext context) {
     final collabs = _filteredCollabs;
+    final tokens = context.tokens;
     return Scaffold(
       backgroundColor: MingaTheme.background,
       appBar: AppBar(
@@ -184,38 +198,47 @@ class _CollabsExploreScreenState extends State<CollabsExploreScreen> {
       body: CustomScrollView(
         slivers: [
           SliverToBoxAdapter(child: SizedBox(height: 8)),
-          SliverToBoxAdapter(child: _buildSystemCollabSection()),
-          SliverToBoxAdapter(child: SizedBox(height: 12)),
           SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Row(
-                children: [
-                  _buildChip(
-                    label: 'Popular',
-                    isSelected: _activeFilter == CollabsExploreFilter.popular,
-                    onTap: () => _setFilter(CollabsExploreFilter.popular),
-                  ),
-                  SizedBox(width: 8),
-                  _buildChip(
-                    label: 'New',
-                    isSelected: _activeFilter == CollabsExploreFilter.newest,
-                    onTap: () => _setFilter(CollabsExploreFilter.newest),
-                  ),
-                  SizedBox(width: 8),
-                  _buildChip(
-                    label: 'Following',
-                    isSelected: _activeFilter == CollabsExploreFilter.following,
-                    onTap: () => _setFilter(CollabsExploreFilter.following),
-                  ),
-                ],
+            child: _buildSectionPanel(
+              tint: tokens.colors.info.withOpacity(0.04),
+              radius: tokens.radius.xl,
+              child: _buildSystemCollabSection(
+                title: 'In deiner Nähe',
+                items: _nearbySystemCollabs,
+                isLoading: _isSystemLoading,
+                subtitle: 'Kuratiert für deine Umgebung',
+                titleIcon: Icons.near_me,
+                height: 115,
               ),
             ),
           ),
           SliverToBoxAdapter(child: SizedBox(height: 12)),
+          SliverToBoxAdapter(
+            child: _buildSectionPanel(
+              tint: tokens.colors.warning.withOpacity(0.04),
+              radius: tokens.radius.xl,
+              child: _buildSystemCollabSection(
+                title: 'Events diese Woche',
+                items: _eventSystemCollabs,
+                isLoading: _isSystemLoading,
+                subtitle: 'Alle kommenden Highlights der Woche',
+                titleIcon: Icons.event,
+                height: 115,
+                emptyText: 'Keine Events diese Woche',
+              ),
+            ),
+          ),
+          SliverToBoxAdapter(child: SizedBox(height: 12)),
+          SliverToBoxAdapter(
+            child: _buildFilterBar(),
+          ),
+          SliverToBoxAdapter(child: SizedBox(height: 12)),
           if (_activeFilter == CollabsExploreFilter.following)
             SliverToBoxAdapter(
-              child: _buildFollowedSystemCollabSection(),
+              child: _buildSectionPanel(
+                tint: tokens.colors.surfaceStrong.withOpacity(0.06),
+                child: _buildFollowedSystemCollabSection(),
+              ),
             ),
           if (_activeFilter == CollabsExploreFilter.following)
             SliverToBoxAdapter(child: SizedBox(height: 12)),
@@ -301,7 +324,67 @@ class _CollabsExploreScreenState extends State<CollabsExploreScreen> {
                 ),
               ),
             ),
+          SliverToBoxAdapter(
+            child: SizedBox(height: bottomNavSafePadding(context)),
+          ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildSectionPanel({
+    required Widget child,
+    Color? tint,
+    double? radius,
+  }) {
+    final tokens = context.tokens;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Container(
+        decoration: BoxDecoration(
+          color: tint ?? tokens.colors.surface.withOpacity(0.04),
+          borderRadius: BorderRadius.circular(radius ?? tokens.radius.lg),
+        ),
+        padding: EdgeInsets.all(tokens.space.s12),
+        child: child,
+      ),
+    );
+  }
+
+  Widget _buildFilterBar() {
+    final tokens = context.tokens;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: GlassSurface(
+        radius: tokens.radius.lg,
+        blur: tokens.blur.low,
+        scrim: tokens.colors.surfaceStrong.withOpacity(0.06),
+        borderColor: Colors.transparent,
+        padding: EdgeInsets.all(tokens.space.s12),
+        child: Row(
+          children: [
+            _buildChip(
+              label: 'Beliebt',
+              icon: Icons.trending_up,
+              isSelected: _activeFilter == CollabsExploreFilter.popular,
+              onTap: () => _setFilter(CollabsExploreFilter.popular),
+            ),
+            SizedBox(width: 8),
+            _buildChip(
+              label: 'Neu',
+              icon: Icons.fiber_new,
+              isSelected: _activeFilter == CollabsExploreFilter.newest,
+              onTap: () => _setFilter(CollabsExploreFilter.newest),
+            ),
+            SizedBox(width: 8),
+            _buildChip(
+              label: 'Gefolgt',
+              icon: Icons.bookmark,
+              isSelected: _activeFilter == CollabsExploreFilter.following,
+              onTap: () => _setFilter(CollabsExploreFilter.following),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -364,26 +447,38 @@ class _CollabsExploreScreenState extends State<CollabsExploreScreen> {
     });
   }
 
-  Widget _buildSystemCollabSection() {
-    final items = _systemCollabs.take(8).toList();
+  Widget _buildSystemCollabSection({
+    required String title,
+    required List<CollabDefinition> items,
+    required bool isLoading,
+    String emptyText = 'Noch keine Collabs verfügbar',
+    String? subtitle,
+    IconData? titleIcon,
+    double height = 115,
+  }) {
+    final limited = items.take(8).toList();
+    final tokens = context.tokens;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      padding: EdgeInsets.all(tokens.space.s2),
       child: CollabCarousel(
-        title: 'In deiner Nähe',
-        isLoading: _isSystemLoading,
-        emptyText: 'Noch keine Collabs verfügbar',
+        title: title,
+        subtitle: subtitle,
+        titleIcon: titleIcon,
+        isLoading: isLoading,
+        emptyText: emptyText,
         onSeeAll: () {},
         showSeeAll: false,
-        itemCount: items.length,
+        height: height,
+        itemCount: limited.length,
         itemBuilder: (context, index) {
-          final collab = items[index];
+          final collab = limited[index];
           final fallbackUrls = _fallbackMediaByCollabId[collab.id] ?? const [];
           final mediaUrls = fallbackUrls;
-          final collabIds = items.map((item) => item.id).toList();
+          final collabIds = limited.map((item) => item.id).toList();
           final initialIndex = collabIds.indexOf(collab.id);
           return Padding(
             padding: EdgeInsets.only(
-              right: index == items.length - 1 ? 0 : 16,
+              right: index == limited.length - 1 ? 0 : 16,
             ),
             child: CollabCard(
               title: collab.title,
@@ -391,8 +486,12 @@ class _CollabsExploreScreenState extends State<CollabsExploreScreen> {
               avatarUrl: collab.creatorAvatarUrl,
               creatorId: collab.creatorId,
               creatorBadge: null,
+              activityLabel: null,
+              activityColor: null,
+              aspectRatio: 16 / 10,
               mediaUrls: mediaUrls,
-              imageUrl: mediaUrls.isNotEmpty ? mediaUrls.first : collab.heroImageUrl,
+              imageUrl:
+                  mediaUrls.isNotEmpty ? mediaUrls.first : collab.heroImageUrl,
               gradientKey: collab.gradientKey,
               onCreatorTap: () {},
               onTap: () {
@@ -415,68 +514,71 @@ class _CollabsExploreScreenState extends State<CollabsExploreScreen> {
 
   Widget _buildFollowedSystemCollabSection() {
     if (_isFollowedSystemLoading) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: CollabCarousel(
-          title: 'Gefolgt',
-          isLoading: true,
-          emptyText: '',
-          onSeeAll: () {},
-          showSeeAll: false,
-          itemCount: 0,
-          itemBuilder: (_, __) => const SizedBox.shrink(),
-        ),
+      return CollabCarousel(
+        title: 'Gefolgt',
+        subtitle: 'Deine System‑Listen',
+        titleIcon: Icons.bookmark,
+        isLoading: true,
+        emptyText: '',
+        onSeeAll: () {},
+        showSeeAll: false,
+        height: 115,
+        itemCount: 0,
+        itemBuilder: (_, __) => const SizedBox.shrink(),
       );
     }
     if (_followedSystemCollabs.isEmpty) {
       return const SizedBox.shrink();
     }
     final items = _followedSystemCollabs;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: CollabCarousel(
-        title: 'Gefolgt',
-        isLoading: false,
-        emptyText: '',
-        onSeeAll: () {},
-        showSeeAll: false,
-        itemCount: items.length,
-        itemBuilder: (context, index) {
-          final collab = items[index];
-          final fallbackUrls = _fallbackMediaByCollabId[collab.id] ?? const [];
-          final mediaUrls = fallbackUrls;
-          final collabIds = items.map((item) => item.id).toList();
-          final initialIndex = collabIds.indexOf(collab.id);
-          return Padding(
-            padding: EdgeInsets.only(
-              right: index == items.length - 1 ? 0 : 16,
-            ),
-            child: CollabCard(
-              title: collab.title,
-              username: collab.creatorName,
-              avatarUrl: collab.creatorAvatarUrl,
-              creatorId: collab.creatorId,
-              creatorBadge: null,
-              mediaUrls: mediaUrls,
-              imageUrl:
-                  mediaUrls.isNotEmpty ? mediaUrls.first : collab.heroImageUrl,
-              gradientKey: collab.gradientKey,
-              onCreatorTap: () {},
-              onTap: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (context) => CollabDetailScreen(
-                      collabId: collab.id,
-                      collabIds: collabIds,
-                      initialIndex: initialIndex < 0 ? 0 : initialIndex,
-                    ),
+    return CollabCarousel(
+      title: 'Gefolgt',
+      subtitle: 'Deine System‑Listen',
+      titleIcon: Icons.bookmark,
+      isLoading: false,
+      emptyText: '',
+      onSeeAll: () {},
+      showSeeAll: false,
+      height: 115,
+      itemCount: items.length,
+      itemBuilder: (context, index) {
+        final collab = items[index];
+        final fallbackUrls = _fallbackMediaByCollabId[collab.id] ?? const [];
+        final mediaUrls = fallbackUrls;
+        final collabIds = items.map((item) => item.id).toList();
+        final initialIndex = collabIds.indexOf(collab.id);
+        return Padding(
+          padding: EdgeInsets.only(
+            right: index == items.length - 1 ? 0 : 16,
+          ),
+          child: CollabCard(
+            title: collab.title,
+            username: collab.creatorName,
+            avatarUrl: collab.creatorAvatarUrl,
+            creatorId: collab.creatorId,
+            creatorBadge: null,
+            activityLabel: null,
+            activityColor: null,
+            aspectRatio: 16 / 10,
+            mediaUrls: mediaUrls,
+            imageUrl:
+                mediaUrls.isNotEmpty ? mediaUrls.first : collab.heroImageUrl,
+            gradientKey: collab.gradientKey,
+            onCreatorTap: () {},
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => CollabDetailScreen(
+                    collabId: collab.id,
+                    collabIds: collabIds,
+                    initialIndex: initialIndex < 0 ? 0 : initialIndex,
                   ),
-                );
-              },
-            ),
-          );
-        },
-      ),
+                ),
+              );
+            },
+          ),
+        );
+      },
     );
   }
 
@@ -527,6 +629,7 @@ class _CollabsExploreScreenState extends State<CollabsExploreScreen> {
 
   Widget _buildChip({
     required String label,
+    required IconData icon,
     required bool isSelected,
     required VoidCallback onTap,
   }) {
@@ -537,22 +640,35 @@ class _CollabsExploreScreenState extends State<CollabsExploreScreen> {
         curve: MingaTheme.motionCurve,
         child: GlassSurface(
           radius: MingaTheme.chipRadius,
-          blurSigma: 14,
+          blurSigma: 12,
           overlayColor: isSelected
               ? MingaTheme.glassOverlayStrong
-              : MingaTheme.glassOverlay,
-          borderColor:
-              isSelected ? MingaTheme.borderStrong : MingaTheme.borderSubtle,
+              : MingaTheme.glassOverlaySoft,
+          borderColor: Colors.transparent,
           boxShadow: isSelected ? MingaTheme.cardShadow : null,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-            child: Text(
-              label,
-              style: MingaTheme.label.copyWith(
-                color:
-                    isSelected ? MingaTheme.accentGreen : MingaTheme.textPrimary,
-                fontWeight: FontWeight.w600,
-              ),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  icon,
+                  size: 14,
+                  color: isSelected
+                      ? MingaTheme.accentGreen
+                      : MingaTheme.textSubtle,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  label,
+                  style: MingaTheme.label.copyWith(
+                    color: isSelected
+                        ? MingaTheme.accentGreen
+                        : MingaTheme.textPrimary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
             ),
           ),
         ),
