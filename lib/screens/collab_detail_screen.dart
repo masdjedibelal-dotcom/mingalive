@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:cross_file/cross_file.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter/rendering.dart';
@@ -128,6 +129,7 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
   final Map<String, List<String>> _fallbackMediaByCollabId = {};
   gmaps.GoogleMapController? _collabMapController;
   final Map<String, gmaps.BitmapDescriptor> _collabMarkerCache = {};
+  bool _isPlacesMapExpanded = false;
 
   @override
   void initState() {
@@ -2051,34 +2053,94 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
             (bounds.southwest.longitude + bounds.northeast.longitude) / 2,
           );
 
+    final mapHeight = _isPlacesMapExpanded ? 420.0 : 260.0;
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(tokens.radius.lg),
-        child: SizedBox(
-          height: 260,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOut,
+          height: mapHeight,
           child: FutureBuilder<Set<gmaps.Marker>>(
             future: _buildNumberedMarkers(placesWithCoords),
             builder: (context, snapshot) {
               final markers = snapshot.data ?? const <gmaps.Marker>{};
-              return gmaps.GoogleMap(
-                initialCameraPosition: gmaps.CameraPosition(
-                  target: center,
-                  zoom: 13.2,
-                ),
-                onMapCreated: (controller) {
-                  _collabMapController = controller;
-                  _collabMapController?.setMapStyle(_darkMapStyle);
-                  if (bounds != null) {
-                    controller.animateCamera(
-                      gmaps.CameraUpdate.newLatLngBounds(bounds, 60),
-                    );
-                  }
-                },
-                myLocationEnabled: false,
-                myLocationButtonEnabled: false,
-                zoomControlsEnabled: true,
-                markers: markers,
+              return Stack(
+                children: [
+                  Positioned.fill(
+                    child: gmaps.GoogleMap(
+                      initialCameraPosition: gmaps.CameraPosition(
+                        target: center,
+                        zoom: 13.2,
+                      ),
+                      onMapCreated: (controller) {
+                        _collabMapController = controller;
+                        _collabMapController?.setMapStyle(_darkMapStyle);
+                        if (bounds != null) {
+                          controller.animateCamera(
+                            gmaps.CameraUpdate.newLatLngBounds(bounds, 60),
+                          );
+                        }
+                      },
+                      gestureRecognizers: {
+                        Factory<OneSequenceGestureRecognizer>(
+                          () => EagerGestureRecognizer(),
+                        ),
+                      },
+                      myLocationEnabled: false,
+                      myLocationButtonEnabled: false,
+                      zoomControlsEnabled: true,
+                      markers: markers,
+                    ),
+                  ),
+                  Positioned(
+                    top: 10,
+                    right: 10,
+                    child: InkWell(
+                      onTap: () {
+                        setState(() {
+                          _isPlacesMapExpanded = !_isPlacesMapExpanded;
+                        });
+                      },
+                      borderRadius: BorderRadius.circular(18),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.5),
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(
+                            color: Colors.white.withOpacity(0.2),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              _isPlacesMapExpanded
+                                  ? Icons.expand_less
+                                  : Icons.expand_more,
+                              color: Colors.white,
+                              size: 18,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              _isPlacesMapExpanded ? 'Karte klein' : 'Karte groß',
+                              style: tokens.type.caption.copyWith(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               );
             },
           ),
@@ -2131,7 +2193,7 @@ class _CollabDetailScreenState extends State<CollabDetailScreen> {
     final cached = _collabMarkerCache[key];
     if (cached != null) return cached;
 
-    const size = 48.0;
+    const size = 52.0;
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
     final center = Offset(size / 2, size / 2);

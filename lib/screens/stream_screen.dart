@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../theme/app_theme_extensions.dart';
 import '../theme/app_tokens.dart';
 import '../data/place_repository.dart';
@@ -142,6 +143,9 @@ class StreamScreenState extends State<StreamScreen>
   Timer? _mapRefreshTimer;
   Set<Marker> _mapMarkers = {};
   Set<Circle> _mapCircles = {};
+  RealtimeChannel? _liveTickerChannel;
+  Set<String> _liveTickerRoomIds = {};
+  Timer? _liveTickerOverlayTimer;
   double _tickerExtent = 0;
   bool _tickerInitialized = false;
   final Map<String, BitmapDescriptor> _markerIconCache = {};
@@ -168,6 +172,7 @@ class StreamScreenState extends State<StreamScreen>
 
     if (SupabaseGate.isEnabled) {
       _chatRepository = SupabaseChatRepository();
+      _ensureLiveTickerRealtime();
     } else {
       _chatRepository = ChatRepository();
     }
@@ -450,6 +455,8 @@ class StreamScreenState extends State<StreamScreen>
       }
     });
     debugPrint('VISIBLE count=$_visibleCount');
+    _scheduleMapRefresh();
+    _syncLiveTickerRoomIds();
     if (currentId == null) return;
     final newIndex =
         _sortedPlaces.indexWhere((place) => place.id == currentId);
@@ -459,7 +466,6 @@ class StreamScreenState extends State<StreamScreen>
       if (!_pageController.hasClients) return;
       _pageController.jumpToPage(newIndex);
     });
-    _scheduleMapRefresh();
   }
 
   void _setStreamView(StreamView next) {
@@ -497,6 +503,99 @@ class StreamScreenState extends State<StreamScreen>
     _mapRefreshTimer?.cancel();
     _mapRefreshTimer = Timer(const Duration(milliseconds: 200), () {
       _refreshMapPreviews();
+      _rebuildMapOverlays();
+    });
+  }
+
+  void _ensureLiveTickerRealtime() {
+    if (!SupabaseGate.isEnabled) return;
+    if (_liveTickerChannel != null) return;
+
+    try {
+      final supabase = SupabaseGate.client;
+      final currentUserId = AuthService.instance.currentUser?.id;
+      final channel = supabase.channel('live_ticker');
+
+      channel.onPostgresChanges(
+        event: PostgresChangeEvent.insert,
+        schema: 'public',
+        table: 'messages',
+        callback: (payload) {
+          try {
+            final message = ChatMessage.fromJson(
+              Map<String, dynamic>.from(payload.newRecord),
+              currentUserId: currentUserId,
+            );
+            final roomId = message.roomId;
+            if (roomId.isEmpty || !_liveTickerRoomIds.contains(roomId)) {
+              return;
+            }
+            final placeIndex = _sortedPlaces.indexWhere(
+              (item) => item.roomId == roomId,
+            );
+            if (placeIndex == -1) return;
+            final place = _sortedPlaces[placeIndex];
+
+            final now = DateTime.now();
+            final updated = List<_RoomMessagePreview>.from(_mapPreviews);
+            final index =
+                updated.indexWhere((preview) => preview.place.id == place.id);
+            final nextPreview =
+                _RoomMessagePreview(place: place, message: message);
+            if (index == -1) {
+              updated.add(nextPreview);
+            } else {
+              updated[index] = nextPreview;
+            }
+
+            final recentOnly = updated.where((preview) {
+              final createdAt = preview.message?.createdAt;
+              if (createdAt == null) return false;
+              return now.difference(createdAt).inHours < 24;
+            }).toList()
+              ..sort((a, b) {
+                final aTime = a.message?.createdAt;
+                final bTime = b.message?.createdAt;
+                if (aTime == null && bTime == null) return 0;
+                if (aTime == null) return 1;
+                if (bTime == null) return -1;
+                return bTime.compareTo(aTime);
+              });
+
+            if (!mounted) return;
+            setState(() {
+              _mapPreviews = recentOnly.take(10).toList();
+            });
+            _scheduleLiveTickerOverlayRebuild();
+          } catch (e) {
+            if (kDebugMode) {
+              debugPrint('❌ StreamScreen: Live ticker realtime failed: $e');
+            }
+          }
+        },
+      ).subscribe();
+
+      _liveTickerChannel = channel;
+      if (kDebugMode) {
+        debugPrint('✅ StreamScreen: Live ticker realtime subscribed');
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ StreamScreen: Failed to subscribe live ticker: $e');
+      }
+    }
+  }
+
+  void _syncLiveTickerRoomIds() {
+    _liveTickerRoomIds = _sortedPlaces
+        .map((place) => place.roomId)
+        .where((roomId) => roomId.isNotEmpty)
+        .toSet();
+  }
+
+  void _scheduleLiveTickerOverlayRebuild() {
+    _liveTickerOverlayTimer?.cancel();
+    _liveTickerOverlayTimer = Timer(const Duration(milliseconds: 250), () {
       _rebuildMapOverlays();
     });
   }
@@ -802,7 +901,7 @@ class StreamScreenState extends State<StreamScreen>
   Future<BitmapDescriptor> _markerIconFor({
     required Color color,
     String? label,
-    double size = 44,
+    double size = 48,
   }) async {
     final key = '${color.value}_${label ?? 'pin'}_${size.toInt()}';
     final cached = _markerIconCache[key];
@@ -908,6 +1007,11 @@ class StreamScreenState extends State<StreamScreen>
     _favoritePrefetchTimer?.cancel();
     _mapRefreshTimer?.cancel();
     _loginGateTimer?.cancel();
+    _liveTickerOverlayTimer?.cancel();
+    final channel = _liveTickerChannel;
+    if (channel != null && SupabaseGate.isEnabled) {
+      SupabaseGate.client.removeChannel(channel);
+    }
     
     _pageController.dispose();
     _locationStore.removeListener(_handleLocationUpdate);
@@ -976,15 +1080,12 @@ class StreamScreenState extends State<StreamScreen>
             offstage: _activeView != StreamView.list,
             child: _buildListBody(tokens, bottomInset),
           ),
-          Align(
-            alignment: Alignment.topCenter,
-            child: Padding(
-              padding: EdgeInsets.only(
-                top: MediaQuery.of(context).padding.top + 40,
-              ),
+          if (_activeView == StreamView.map)
+            Positioned(
+              top: MediaQuery.of(context).padding.top + tokens.space.s12,
+              right: tokens.space.s12,
               child: _buildViewToggle(tokens),
             ),
-          ),
         ],
       ),
     );
@@ -1605,6 +1706,7 @@ class StreamScreenState extends State<StreamScreen>
             onOpenRoomInfo: () => _openRoomInfo(place),
             showBackButton: _isSingleRoomMode,
             onBack: _isSingleRoomMode ? _exitSingleRoomMode : null,
+            viewToggle: _buildViewToggle(tokens),
           ),
           Expanded(
             child: StreamChatPane(
@@ -3035,6 +3137,7 @@ class StreamHeader extends StatelessWidget {
   final VoidCallback onOpenRoomInfo;
   final bool showBackButton;
   final VoidCallback? onBack;
+  final Widget? viewToggle;
 
   const StreamHeader({
     super.key,
@@ -3048,6 +3151,7 @@ class StreamHeader extends StatelessWidget {
     required this.onOpenRoomInfo,
     this.showBackButton = false,
     this.onBack,
+    this.viewToggle,
   });
 
   @override
@@ -3119,12 +3223,24 @@ class StreamHeader extends StatelessWidget {
               ],
             ),
             SizedBox(height: tokens.space.s6),
-            Wrap(
-              spacing: tokens.space.s8,
-              runSpacing: tokens.space.s6,
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                _buildOnlinePill(context, liveCount),
-                if (distanceKm != null) _buildDistancePill(context, distanceKm!),
+                Expanded(
+                  child: Wrap(
+                    spacing: tokens.space.s8,
+                    runSpacing: tokens.space.s6,
+                    children: [
+                      _buildOnlinePill(context, liveCount),
+                      if (distanceKm != null)
+                        _buildDistancePill(context, distanceKm!),
+                    ],
+                  ),
+                ),
+                if (viewToggle != null) ...[
+                  SizedBox(width: tokens.space.s8),
+                  viewToggle!,
+                ],
               ],
             ),
           ],

@@ -282,14 +282,14 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   int _compareHypePlaces(Place a, Place b) {
+    final distanceCompare = PlaceRepository.compareByDistanceNullable(a, b);
+    if (distanceCompare != 0) return distanceCompare;
     final rankA = _repository.getActivityRank(a);
     final rankB = _repository.getActivityRank(b);
     if (rankA != rankB) return rankB.compareTo(rankA);
     final liveCompare = b.liveCount.compareTo(a.liveCount);
     if (liveCompare != 0) return liveCompare;
-    final ratingCompare = b.ratingCount.compareTo(a.ratingCount);
-    if (ratingCompare != 0) return ratingCompare;
-    return PlaceRepository.compareByDistanceNullable(a, b);
+    return b.ratingCount.compareTo(a.ratingCount);
   }
 
   Future<void> _attachHypeRoomMediaAndChats(List<Place> places) async {
@@ -741,6 +741,8 @@ class _HomeScreenState extends State<HomeScreen> {
       avatarUrl: collab.creatorAvatarUrl,
       creatorId: collab.creatorId,
       creatorBadge: null,
+      borderColor:
+          collab.id == 'events_this_week' ? Colors.transparent : null,
       aspectRatio: 16 / 10,
       mediaUrls: mediaUrls,
       imageUrl: mediaUrls.isNotEmpty ? mediaUrls.first : collab.heroImageUrl,

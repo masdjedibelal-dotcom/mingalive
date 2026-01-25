@@ -52,14 +52,14 @@ class _SearchEntryScreenState extends State<SearchEntryScreen>
   bool _isQuerying = false;
   List<Place> _queryResults = const [];
   List<Event> _eventResults = const [];
+  List<Place> _filteredPlaces = const [];
+  List<Event> _filteredEvents = const [];
   String _lastQuery = '';
   final Map<String, bool> _favoriteByPlaceId = {};
   final Map<String, bool> _favoriteLoadingByPlaceId = {};
   _SearchMode _searchMode = _SearchMode.places;
   _PlaceSort _placeSort = _PlaceSort.relevance;
   bool _filterOpenNow = false;
-  bool _filterNear = false;
-  final double _nearKm = 2.0;
   _EventFilter _eventFilter = _EventFilter.all;
   _EventSort _eventSort = _EventSort.date;
 
@@ -106,6 +106,8 @@ class _SearchEntryScreenState extends State<SearchEntryScreen>
       setState(() {
         _queryResults = const [];
         _eventResults = const [];
+        _filteredPlaces = const [];
+        _filteredEvents = const [];
         _isQuerying = false;
       });
       return;
@@ -128,6 +130,8 @@ class _SearchEntryScreenState extends State<SearchEntryScreen>
         setState(() {
           _eventResults = results;
           _queryResults = const [];
+          _filteredEvents = _applyEventFilters(results);
+          _filteredPlaces = const [];
           _isQuerying = false;
         });
         return;
@@ -139,6 +143,8 @@ class _SearchEntryScreenState extends State<SearchEntryScreen>
       setState(() {
         _queryResults = withDistances;
         _eventResults = const [];
+        _filteredPlaces = _applyPlaceFilters(withDistances);
+        _filteredEvents = const [];
         _isQuerying = false;
       });
       _prefetchFavorites(results);
@@ -147,6 +153,8 @@ class _SearchEntryScreenState extends State<SearchEntryScreen>
       setState(() {
         _queryResults = const [];
         _eventResults = const [];
+        _filteredPlaces = const [];
+        _filteredEvents = const [];
         _isQuerying = false;
       });
     }
@@ -518,7 +526,8 @@ class _SearchEntryScreenState extends State<SearchEntryScreen>
       );
     }
     if (_searchMode == _SearchMode.events) {
-      final filtered = _applyEventFilters(_eventResults);
+      final filtered =
+          _filteredEvents.isNotEmpty ? _filteredEvents : _applyEventFilters(_eventResults);
       if (filtered.isEmpty) {
         return Center(
           child: Text(
@@ -547,7 +556,8 @@ class _SearchEntryScreenState extends State<SearchEntryScreen>
         },
       );
     }
-    final filteredPlaces = _applyPlaceFilters(_queryResults);
+    final filteredPlaces =
+        _filteredPlaces.isNotEmpty ? _filteredPlaces : _applyPlaceFilters(_queryResults);
     if (filteredPlaces.isEmpty) {
       return Center(
         child: Text(
@@ -607,6 +617,8 @@ class _SearchEntryScreenState extends State<SearchEntryScreen>
               if (_searchMode == _SearchMode.places) return;
               setState(() {
                 _searchMode = _SearchMode.places;
+                _filteredPlaces = _applyPlaceFilters(_queryResults);
+                _filteredEvents = const [];
               });
               _runSearch(_controller.text.trim());
             },
@@ -621,6 +633,8 @@ class _SearchEntryScreenState extends State<SearchEntryScreen>
               if (_searchMode == _SearchMode.events) return;
               setState(() {
                 _searchMode = _SearchMode.events;
+                _filteredEvents = _applyEventFilters(_eventResults);
+                _filteredPlaces = const [];
               });
               _runSearch(_controller.text.trim());
             },
@@ -642,6 +656,7 @@ class _SearchEntryScreenState extends State<SearchEntryScreen>
             onTap: () {
               setState(() {
                 _eventFilter = _EventFilter.all;
+                _filteredEvents = _applyEventFilters(_eventResults);
               });
             },
           ),
@@ -651,6 +666,7 @@ class _SearchEntryScreenState extends State<SearchEntryScreen>
             onTap: () {
               setState(() {
                 _eventFilter = _EventFilter.today;
+                _filteredEvents = _applyEventFilters(_eventResults);
               });
             },
           ),
@@ -660,6 +676,7 @@ class _SearchEntryScreenState extends State<SearchEntryScreen>
             onTap: () {
               setState(() {
                 _eventFilter = _EventFilter.week;
+                _filteredEvents = _applyEventFilters(_eventResults);
               });
             },
           ),
@@ -669,6 +686,7 @@ class _SearchEntryScreenState extends State<SearchEntryScreen>
             onTap: () {
               setState(() {
                 _eventSort = _EventSort.date;
+                _filteredEvents = _applyEventFilters(_eventResults);
               });
             },
           ),
@@ -678,6 +696,7 @@ class _SearchEntryScreenState extends State<SearchEntryScreen>
             onTap: () {
               setState(() {
                 _eventSort = _EventSort.title;
+                _filteredEvents = _applyEventFilters(_eventResults);
               });
             },
           ),
@@ -694,15 +713,17 @@ class _SearchEntryScreenState extends State<SearchEntryScreen>
           onTap: () {
             setState(() {
               _placeSort = _PlaceSort.relevance;
+              _filteredPlaces = _applyPlaceFilters(_queryResults);
             });
           },
         ),
         _SearchFilterChip(
-          label: 'Nähe',
+          label: 'Distanz',
           isActive: _placeSort == _PlaceSort.distance,
           onTap: () {
             setState(() {
               _placeSort = _PlaceSort.distance;
+              _filteredPlaces = _applyPlaceFilters(_queryResults);
             });
           },
         ),
@@ -712,6 +733,7 @@ class _SearchEntryScreenState extends State<SearchEntryScreen>
           onTap: () {
             setState(() {
               _placeSort = _PlaceSort.rating;
+              _filteredPlaces = _applyPlaceFilters(_queryResults);
             });
           },
         ),
@@ -721,15 +743,7 @@ class _SearchEntryScreenState extends State<SearchEntryScreen>
           onTap: () {
             setState(() {
               _filterOpenNow = !_filterOpenNow;
-            });
-          },
-        ),
-        _SearchFilterChip(
-          label: '≤ ${_nearKm.toStringAsFixed(0)} km',
-          isActive: _filterNear,
-          onTap: () {
-            setState(() {
-              _filterNear = !_filterNear;
+              _filteredPlaces = _applyPlaceFilters(_queryResults);
             });
           },
         ),
@@ -741,12 +755,6 @@ class _SearchEntryScreenState extends State<SearchEntryScreen>
     var result = List<Place>.from(input);
     if (_filterOpenNow) {
       result = result.where(_isOpenNow).toList();
-    }
-    if (_filterNear) {
-      result = result
-          .where((place) =>
-              place.distanceKm != null && place.distanceKm! <= _nearKm)
-          .toList();
     }
     if (_placeSort == _PlaceSort.distance) {
       result.sort((a, b) {
@@ -1148,7 +1156,7 @@ class _SearchStickyHeaderDelegate extends SliverPersistentHeaderDelegate {
 
   @override
   bool shouldRebuild(covariant _SearchStickyHeaderDelegate oldDelegate) {
-    return false;
+    return oldDelegate.height != height || oldDelegate.child != child;
   }
 }
 

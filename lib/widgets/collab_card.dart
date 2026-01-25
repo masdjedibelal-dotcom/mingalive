@@ -29,6 +29,7 @@ class CollabCard extends StatefulWidget {
   final String? ctaLabel;
   final VoidCallback? onCtaTap;
   final VoidCallback? onEditTap;
+  final Color? borderColor;
 
   const CollabCard({
     super.key,
@@ -50,6 +51,7 @@ class CollabCard extends StatefulWidget {
     this.ctaLabel,
     this.onCtaTap,
     this.onEditTap,
+    this.borderColor,
   });
 
   @override
@@ -121,6 +123,7 @@ class _CollabCardState extends State<CollabCard> {
         child: GlassCard(
           variant: GlassCardVariant.media,
           padding: EdgeInsets.zero,
+          borderColor: widget.borderColor,
           child: Stack(
             children: [
               Positioned.fill(child: _buildHero()),

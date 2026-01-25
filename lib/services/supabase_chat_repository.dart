@@ -1865,8 +1865,8 @@ class SupabaseChatRepository {
     try {
       final supabase = SupabaseGate.client;
       final now = DateTime.now();
-      final todayStart = DateTime(now.year, now.month, now.day);
-      final todayStartIso = todayStart.toIso8601String();
+      final since = now.subtract(const Duration(hours: 24));
+      final sinceIso = since.toIso8601String();
 
       final response = await supabase
           .from('messages')
@@ -1874,7 +1874,7 @@ class SupabaseChatRepository {
             'id, room_id, user_id, user_name, user_avatar, text, media_url, created_at',
           )
           .inFilter('room_id', roomIds)
-          .gte('created_at', todayStartIso)
+          .gte('created_at', sinceIso)
           .order('created_at', ascending: false)
           .limit(roomIds.length * 3);
 
