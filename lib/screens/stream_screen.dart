@@ -526,26 +526,32 @@ class StreamScreenState extends State<StreamScreen>
               Map<String, dynamic>.from(payload.newRecord),
               currentUserId: currentUserId,
             );
+            if (kDebugMode) {
+              debugPrint(
+                '📩 LiveTicker insert room=${message.roomId} at=${message.createdAt.toIso8601String()} text="${message.text}"',
+              );
+            }
             final roomId = message.roomId;
             if (roomId.isEmpty || !_liveTickerRoomIds.contains(roomId)) {
+              if (kDebugMode) {
+                debugPrint(
+                  '⚠️ LiveTicker ignored room=$roomId tracked=${_liveTickerRoomIds.length}',
+                );
+              }
               return;
             }
             final placeIndex = _sortedPlaces.indexWhere(
-              (item) => item.roomId == roomId,
+              (item) => item.chatRoomId == roomId,
             );
             if (placeIndex == -1) return;
             final place = _sortedPlaces[placeIndex];
 
             final now = DateTime.now();
             final updated = List<_RoomMessagePreview>.from(_mapPreviews);
-            final index =
-                updated.indexWhere((preview) => preview.place.id == place.id);
-            final nextPreview =
-                _RoomMessagePreview(place: place, message: message);
-            if (index == -1) {
-              updated.add(nextPreview);
-            } else {
-              updated[index] = nextPreview;
+            final alreadyExists =
+                updated.any((preview) => preview.message?.id == message.id);
+            if (!alreadyExists) {
+              updated.add(_RoomMessagePreview(place: place, message: message));
             }
 
             final recentOnly = updated.where((preview) {
@@ -567,6 +573,9 @@ class StreamScreenState extends State<StreamScreen>
               _mapPreviews = recentOnly.take(10).toList();
             });
             _scheduleLiveTickerOverlayRebuild();
+            if (kDebugMode) {
+              debugPrint('✅ LiveTicker updated count=${_mapPreviews.length}');
+            }
           } catch (e) {
             if (kDebugMode) {
               debugPrint('❌ StreamScreen: Live ticker realtime failed: $e');
@@ -588,9 +597,12 @@ class StreamScreenState extends State<StreamScreen>
 
   void _syncLiveTickerRoomIds() {
     _liveTickerRoomIds = _sortedPlaces
-        .map((place) => place.roomId)
+        .map((place) => place.chatRoomId)
         .where((roomId) => roomId.isNotEmpty)
         .toSet();
+    if (kDebugMode) {
+      debugPrint('🧭 LiveTicker rooms synced: ${_liveTickerRoomIds.length}');
+    }
   }
 
   void _scheduleLiveTickerOverlayRebuild() {
@@ -615,24 +627,37 @@ class StreamScreenState extends State<StreamScreen>
       _isMapLoading = true;
     });
 
-    Map<String, ChatMessage> latestByRoom = {};
+    List<ChatMessage> recentMessages = [];
     if (SupabaseGate.isEnabled && _chatRepository is SupabaseChatRepository) {
       final repo = _chatRepository as SupabaseChatRepository;
-      latestByRoom = await repo.fetchLatestMessages(
-        rooms.map((place) => place.roomId).toList(),
+      recentMessages = await repo.fetchRecentMessages(
+        rooms.map((place) => place.chatRoomId).toList(),
+        limit: 20,
       );
     }
 
     if (!mounted) return;
     final now = DateTime.now();
-    final previews = rooms
-        .map(
-          (place) => _RoomMessagePreview(
-            place: place,
-            message: latestByRoom[place.roomId],
-          ),
-        )
-        .toList();
+    final previews = <_RoomMessagePreview>[];
+    for (final message in recentMessages) {
+      final place = rooms.firstWhere(
+        (item) => item.chatRoomId == message.roomId,
+        orElse: () => const Place(
+          id: '',
+          name: '',
+          category: '',
+          imageUrl: '',
+          rating: 0,
+          ratingCount: 0,
+          isLive: false,
+          liveCount: 0,
+          shortStatus: '',
+          chatPreview: [],
+        ),
+      );
+      if (place.id.isEmpty) continue;
+      previews.add(_RoomMessagePreview(place: place, message: message));
+    }
 
     previews.sort((a, b) {
       final aTime = a.message?.createdAt;
@@ -653,6 +678,11 @@ class StreamScreenState extends State<StreamScreen>
       _mapPreviews = recentOnly.take(10).toList();
       _isMapLoading = false;
     });
+    if (kDebugMode) {
+      debugPrint(
+        '🧪 LiveTicker refresh loaded=${_mapPreviews.length} rooms=${rooms.length}',
+      );
+    }
   }
 
   void _rebuildMapOverlays() {
@@ -677,9 +707,16 @@ class StreamScreenState extends State<StreamScreen>
 
     final markers = <Marker>{};
     final circles = <Circle>{};
-    final latestById = <String, ChatMessage?>{
-      for (final preview in _mapPreviews) preview.place.id: preview.message,
-    };
+    final latestById = <String, ChatMessage?>{};
+    for (final preview in _mapPreviews) {
+      final message = preview.message;
+      if (message == null) continue;
+      final existing = latestById[preview.place.id];
+      if (existing == null ||
+          (message.createdAt).isAfter(existing.createdAt)) {
+        latestById[preview.place.id] = message;
+      }
+    }
 
     for (final cluster in clusters) {
       final activity = _clusterActivityScore(cluster, latestById);
@@ -688,7 +725,7 @@ class StreamScreenState extends State<StreamScreen>
       final icon = await _markerIconFor(
         color: markerColor,
         label: isCluster ? '${cluster.places.length}' : null,
-        size: isCluster ? 56 : 44,
+        size: isCluster ? 70 : 55,
       );
       if ((_expandedClusterKey != null &&
               _expandedClusterKey == cluster.key) ||
@@ -702,7 +739,7 @@ class StreamScreenState extends State<StreamScreen>
           final placeIcon = await _markerIconFor(
             color: _markerColorForActivity(placeActivity, isCluster: false),
             label: null,
-            size: 44,
+            size: 55,
           );
           markers.add(
             Marker(
@@ -1390,10 +1427,20 @@ class StreamScreenState extends State<StreamScreen>
   }
 
   _RoomMessagePreview? _previewForPlace(Place place) {
-    return _mapPreviews.firstWhere(
-      (preview) => preview.place.id == place.id,
-      orElse: () => _RoomMessagePreview(place: place, message: null),
-    );
+    _RoomMessagePreview? best;
+    for (final preview in _mapPreviews) {
+      if (preview.place.id != place.id) continue;
+      final currentTime = preview.message?.createdAt;
+      final bestTime = best?.message?.createdAt;
+      if (best == null ||
+          (currentTime != null &&
+              currentTime.isAfter(
+                bestTime ?? DateTime.fromMillisecondsSinceEpoch(0),
+              ))) {
+        best = preview;
+      }
+    }
+    return best ?? _RoomMessagePreview(place: place, message: null);
   }
 
   Future<void> _showMapRoomPreview(Place place) async {

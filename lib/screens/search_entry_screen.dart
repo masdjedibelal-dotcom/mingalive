@@ -449,7 +449,19 @@ class _SearchEntryScreenState extends State<SearchEntryScreen>
                         const SizedBox(height: 10),
                         _buildSearchModeToggle(),
                         const SizedBox(height: 10),
-                        _buildFilterRow(),
+                        GlassSurface(
+                          radius: 18,
+                          blurSigma: 12,
+                          overlayColor: MingaTheme.glassOverlaySoft,
+                          borderColor: Colors.transparent,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 6,
+                            ),
+                            child: _buildFilterRow(),
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -645,68 +657,62 @@ class _SearchEntryScreenState extends State<SearchEntryScreen>
   }
 
   Widget _buildFilterRow() {
+    final chips = <Widget>[];
     if (_searchMode == _SearchMode.events) {
-      return Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: [
-          _SearchFilterChip(
-            label: 'Alle',
-            isActive: _eventFilter == _EventFilter.all,
-            onTap: () {
-              setState(() {
-                _eventFilter = _EventFilter.all;
-                _filteredEvents = _applyEventFilters(_eventResults);
-              });
-            },
-          ),
-          _SearchFilterChip(
-            label: 'Heute',
-            isActive: _eventFilter == _EventFilter.today,
-            onTap: () {
-              setState(() {
-                _eventFilter = _EventFilter.today;
-                _filteredEvents = _applyEventFilters(_eventResults);
-              });
-            },
-          ),
-          _SearchFilterChip(
-            label: 'Diese Woche',
-            isActive: _eventFilter == _EventFilter.week,
-            onTap: () {
-              setState(() {
-                _eventFilter = _EventFilter.week;
-                _filteredEvents = _applyEventFilters(_eventResults);
-              });
-            },
-          ),
-          _SearchFilterChip(
-            label: 'Datum',
-            isActive: _eventSort == _EventSort.date,
-            onTap: () {
-              setState(() {
-                _eventSort = _EventSort.date;
-                _filteredEvents = _applyEventFilters(_eventResults);
-              });
-            },
-          ),
-          _SearchFilterChip(
-            label: 'Titel',
-            isActive: _eventSort == _EventSort.title,
-            onTap: () {
-              setState(() {
-                _eventSort = _EventSort.title;
-                _filteredEvents = _applyEventFilters(_eventResults);
-              });
-            },
-          ),
-        ],
-      );
-    }
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: [
+      chips.addAll([
+        _SearchFilterChip(
+          label: 'Alle',
+          isActive: _eventFilter == _EventFilter.all,
+          onTap: () {
+            setState(() {
+              _eventFilter = _EventFilter.all;
+              _filteredEvents = _applyEventFilters(_eventResults);
+            });
+          },
+        ),
+        _SearchFilterChip(
+          label: 'Heute',
+          isActive: _eventFilter == _EventFilter.today,
+          onTap: () {
+            setState(() {
+              _eventFilter = _EventFilter.today;
+              _filteredEvents = _applyEventFilters(_eventResults);
+            });
+          },
+        ),
+        _SearchFilterChip(
+          label: 'Diese Woche',
+          isActive: _eventFilter == _EventFilter.week,
+          onTap: () {
+            setState(() {
+              _eventFilter = _EventFilter.week;
+              _filteredEvents = _applyEventFilters(_eventResults);
+            });
+          },
+        ),
+        _SearchFilterChip(
+          label: 'Datum',
+          isActive: _eventSort == _EventSort.date,
+          onTap: () {
+            setState(() {
+              _eventSort = _EventSort.date;
+              _filteredEvents = _applyEventFilters(_eventResults);
+            });
+          },
+        ),
+        _SearchFilterChip(
+          label: 'Titel',
+          isActive: _eventSort == _EventSort.title,
+          onTap: () {
+            setState(() {
+              _eventSort = _EventSort.title;
+              _filteredEvents = _applyEventFilters(_eventResults);
+            });
+          },
+        ),
+      ]);
+    } else {
+      chips.addAll([
         _SearchFilterChip(
           label: 'Relevanz',
           isActive: _placeSort == _PlaceSort.relevance,
@@ -747,7 +753,19 @@ class _SearchEntryScreenState extends State<SearchEntryScreen>
             });
           },
         ),
-      ],
+      ]);
+    }
+
+    return SizedBox(
+      height: 40,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 2),
+        physics: const BouncingScrollPhysics(),
+        itemCount: chips.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (_, index) => chips[index],
+      ),
     );
   }
 

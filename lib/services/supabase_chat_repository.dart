@@ -1871,7 +1871,8 @@ class SupabaseChatRepository {
       final response = await supabase
           .from('messages')
           .select(
-            'id, room_id, user_id, user_name, user_avatar, text, media_url, created_at',
+            // media_url is not present on all schemas; keep to core fields
+            'id, room_id, user_id, user_name, user_avatar, text, created_at',
           )
           .inFilter('room_id', roomIds)
           .gte('created_at', sinceIso)
@@ -1893,6 +1894,49 @@ class SupabaseChatRepository {
         debugPrint('❌ SupabaseChatRepository: Failed to fetch latest messages: $e');
       }
       return {};
+    }
+  }
+
+  /// Fetch most recent messages across all rooms (not grouped per room).
+  Future<List<ChatMessage>> fetchRecentMessages(
+    List<String> roomIds, {
+    int limit = 10,
+  }) async {
+    if (!SupabaseGate.isEnabled || roomIds.isEmpty) {
+      return [];
+    }
+
+    try {
+      final supabase = SupabaseGate.client;
+      final currentUserId = AuthService.instance.currentUser?.id;
+      final now = DateTime.now();
+      final since = now.subtract(const Duration(hours: 24));
+      final sinceIso = since.toIso8601String();
+
+      final response = await supabase
+          .from('messages')
+          .select(
+            // media_url is not present on all schemas; keep to core fields
+            'id, room_id, user_id, user_name, user_avatar, text, created_at',
+          )
+          .inFilter('room_id', roomIds)
+          .gte('created_at', sinceIso)
+          .order('created_at', ascending: false)
+          .limit(limit);
+
+      return (response as List)
+          .map(
+            (row) => ChatMessage.fromJson(
+              Map<String, dynamic>.from(row),
+              currentUserId: currentUserId,
+            ),
+          )
+          .toList();
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ SupabaseChatRepository: Failed to fetch recent messages: $e');
+      }
+      return [];
     }
   }
 
